@@ -239,6 +239,10 @@ impl LayoutElement for TestWindow {
         self.0.sizing_mode.get()
     }
 
+    fn is_floating(&self) -> bool {
+        false
+    }
+
     fn pending_sizing_mode(&self) -> SizingMode {
         self.0.pending_sizing_mode.get()
     }
