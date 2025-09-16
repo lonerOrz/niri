@@ -1146,7 +1146,15 @@ impl<W: LayoutElement> Layout<W> {
                             .filter(|move_| next_to == move_.tile.window().id())
                             .is_some()
                         {
-                            // The next_to window is being interactively moved.
+                            // The next_to window is being interactively moved. If there are no
+                            // other windows, we may have no workspaces at all.
+                            if workspaces.is_empty() {
+                                workspaces.push(Workspace::new_no_outputs(
+                                    self.clock.clone(),
+                                    self.options.clone(),
+                                ));
+                            }
+
                             (0, WorkspaceAddWindowTarget::Auto)
                         } else {
                             let ws_idx = workspaces
@@ -3354,6 +3362,11 @@ impl<W: LayoutElement> Layout<W> {
                         1.,
                         self.options.animations.window_movement.0,
                     );
+
+                    // Unlock the view on the workspaces.
+                    for ws in self.workspaces_mut() {
+                        ws.dnd_scroll_gesture_end();
+                    }
                 } else {
                     // Animate the tile back to semitransparent.
                     move_.tile.animate_alpha(

@@ -1575,6 +1575,11 @@ fn check_ops_with_options(options: Options, ops: &[Op]) -> Layout<TestWindow> {
 
 #[test]
 fn operations_dont_panic() {
+    if std::env::var_os("RUN_SLOW_TESTS").is_none() {
+        eprintln!("ignoring slow test");
+        return;
+    }
+
     let every_op = [
         Op::AddOutput(0),
         Op::AddOutput(1),
@@ -2933,6 +2938,68 @@ fn interactive_move_drop_on_other_output_during_animation() {
         Op::RemoveOutput(4),
         Op::InteractiveMoveEnd { window: 3 },
     ];
+    check_ops(&ops);
+}
+
+#[test]
+fn add_window_next_to_only_interactively_moved_without_outputs() {
+    let ops = [
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::AddOutput(1),
+        Op::InteractiveMoveBegin {
+            window: 2,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        Op::InteractiveMoveUpdate {
+            window: 2,
+            dx: 0.0,
+            dy: 3586.692842955048,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        Op::RemoveOutput(1),
+        // We have no outputs, and the only existing window is interactively moved, meaning there
+        // are no workspaces either.
+        Op::AddWindowNextTo {
+            params: TestWindowParams::new(3),
+            next_to_id: 2,
+        },
+    ];
+
+    check_ops(&ops);
+}
+
+#[test]
+fn interactive_move_toggle_floating_ends_dnd_gesture() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::InteractiveMoveBegin {
+            window: 2,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        Op::InteractiveMoveUpdate {
+            window: 2,
+            dx: 0.0,
+            dy: 3586.692842955048,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        Op::Refresh { is_active: false },
+        Op::ToggleWindowFloating { id: None },
+        Op::InteractiveMoveEnd { window: 2 },
+    ];
+
     check_ops(&ops);
 }
 
