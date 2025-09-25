@@ -109,7 +109,121 @@ impl State {
             return false;
         };
 
-        if surface != &root_surface {
+        if surface == &root_surface {
+            let initial_configure_sent = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get::<LayerSurfaceData>()
+                    .unwrap()
+                    .lock()
+                    .unwrap()
+                    .initial_configure_sent
+            });
+
+            let mut map = layer_map_for_output(&output);
+
+            // Arrange the layers before sending the initial configure to respect any size the
+            // client may have sent.
+            map.arrange();
+
+            let layer = map
+                .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
+                .unwrap();
+
+            if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
+                // Explicitly mark blur as dirty when background/bottom layer surface commits
+                EffectsFramebuffers::set_dirty(&output);
+            }
+
+            if initial_configure_sent {
+                if is_mapped(surface) {
+                    let was_unmapped = self.niri.unmapped_layer_surfaces.remove(surface);
+
+                    // Resolve rules for newly mapped layer surfaces.
+                    if was_unmapped {
+                        let config = self.niri.config.borrow();
+
+                        let rules = &config.layer_rules;
+                        let rules =
+                            ResolvedLayerRules::compute(rules, layer, self.niri.is_at_startup);
+
+                        let output_size = output_size(&output);
+                        let scale = output.current_scale().fractional_scale();
+
+                        let mapped = MappedLayer::new(
+                            layer.clone(),
+                            rules,
+                            output_size,
+                            scale,
+                            self.niri.clock.clone(),
+                            &config,
+                        );
+
+                        let prev = self
+                            .niri
+                            .mapped_layer_surfaces
+                            .insert(layer.clone(), mapped);
+                        if prev.is_some() {
+                            error!("MappedLayer was present for an unmapped surface");
+                        }
+                    }
+
+                    // Give focus to newly mapped on-demand surfaces. Some launchers like
+                    // lxqt-runner rely on this behavior. While this behavior doesn't make much
+                    // sense for other clients like panels, the consensus seems to be that it's not
+                    // a big deal since panels generally only open once at the start of the
+                    // session.
+                    //
+                    // Note that:
+                    // 1) Exclusive layer surfaces already get focus automatically in
+                    //    update_keyboard_focus().
+                    // 2) Same-layer exclusive layer surfaces are already preferred to on-demand
+                    //    surfaces in update_keyboard_focus(), so we don't need to check for that
+                    //    here.
+                    //
+                    // https://github.com/YaLTeR/niri/issues/641
+                    let on_demand = layer.cached_state().keyboard_interactivity
+                        == wlr_layer::KeyboardInteractivity::OnDemand;
+                    if was_unmapped && on_demand {
+                        // I guess it'd make sense to check that no higher-layer on-demand surface
+                        // has focus, but Smithay's Layer doesn't implement Ord so this would be a
+                        // little annoying.
+                        self.niri.layer_shell_on_demand_focus = Some(layer.clone());
+                    }
+                } else {
+                    let was_mapped = self.niri.mapped_layer_surfaces.remove(layer).is_some();
+                    self.niri.unmapped_layer_surfaces.insert(surface.clone());
+
+                    // After layer surface unmaps it has to perform the initial commit-configure
+                    // sequence again. This is a workaround until Smithay properly resets
+                    // initial_configure_sent upon the surface unmapping itself as it does for
+                    // toplevels.
+                    if was_mapped {
+                        with_states(surface, |states| {
+                            let mut data = states
+                                .data_map
+                                .get::<LayerSurfaceData>()
+                                .unwrap()
+                                .lock()
+                                .unwrap();
+                            data.initial_configure_sent = false;
+                        });
+                    }
+                }
+            } else {
+                let scale = output.current_scale();
+                let transform = output.current_transform();
+                with_states(surface, |data| {
+                    send_scale_transform(surface, data, scale, transform);
+                });
+
+                layer.layer_surface().send_configure();
+            }
+            drop(map);
+
+            // This will call queue_redraw() inside.
+            self.niri.output_resized(&output);
+        } else {
             // This is an unsync layer-shell subsurface.
             self.niri.queue_redraw(&output);
             return true;
