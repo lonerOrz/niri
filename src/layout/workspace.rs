@@ -14,6 +14,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Serial, Size, Transform};
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::shell::xdg::SurfaceCachedState;
+use crate::render_helpers::blur::EffectsFramebuffers;
 
 use super::floating::{FloatingSpace, FloatingSpaceRenderElement};
 use super::scrolling::{
@@ -475,10 +476,12 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    fn enter_output_for_window(&self, window: &W) {
+        fn enter_output_for_window(&self, window: &W) {
         if let Some(output) = &self.output {
             window.set_preferred_scale_transform(self.scale, self.transform);
             window.output_enter(output);
+            EffectsFramebuffers::set_dirty(output);
+            EffectsFramebuffers::set_dirty(output);
         }
     }
 

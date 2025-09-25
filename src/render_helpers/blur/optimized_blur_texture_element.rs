@@ -85,7 +85,7 @@ impl RenderElement<GlesRenderer> for OptimizedBlurTextureElement<GlesTexture> {
     fn underlying_storage(
         &self,
         renderer: &mut GlesRenderer,
-    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage> {
+    ) -> Option<smithay::backend::renderer::element::UnderlyingStorage<'_>> {
         self.0.underlying_storage(renderer)
     }
 }
@@ -113,7 +113,7 @@ impl<'render> RenderElement<TtyRenderer<'render>> for OptimizedBlurTextureElemen
         Ok(())
     }
 
-    fn underlying_storage(&self, renderer: &mut TtyRenderer<'render>) -> Option<UnderlyingStorage> {
+    fn underlying_storage(&self, renderer: &mut TtyRenderer<'render>) -> Option<UnderlyingStorage<'_>> {
         self.0.underlying_storage(renderer.as_gles_renderer())
     }
 }

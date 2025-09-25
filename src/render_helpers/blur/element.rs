@@ -150,7 +150,7 @@ impl Element for BlurRenderElement {
                 size,
                 scale,
                 ..
-            } => src.to_buffer(*scale as f64, *transform, &size.to_f64()),
+            } => src.to_buffer(*scale, *transform, &size.to_f64()),
         }
     }
 
@@ -242,9 +242,9 @@ fn draw_true_blur(
     let blurred_texture = gles_frame.with_context(|gl| unsafe {
         super::get_main_buffer_blur(
             gl,
-            &mut *fx_buffers,
+            &mut fx_buffers,
             &shaders,
-            config.clone(),
+            *config,
             projection_matrix,
             scale as i32,
             &vbos,
@@ -437,7 +437,7 @@ impl<'render> RenderElement<TtyRenderer<'render>> for BlurRenderElement {
     fn underlying_storage(
         &self,
         _renderer: &mut TtyRenderer<'render>,
-    ) -> Option<UnderlyingStorage> {
+    ) -> Option<UnderlyingStorage<'_>> {
         None
     }
 }
