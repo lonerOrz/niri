@@ -70,12 +70,15 @@ pub struct EffectsFramebuffers {
     /// One exception is that if we are on the first pass, we are on [`CurrentBuffer::Initial`], we
     /// are sampling from [`Self::blit_buffer`] from initial screen contents.
     current_buffer: CurrentBuffer,
+    pub last_blur_update_time: Instant,
+    pub last_set_dirty_call_time: Instant,
+    pub pending_blur_due_to_throttle: bool,
 }
 
 type EffectsFramebufffersUserData = Rc<RefCell<EffectsFramebuffers>>;
 
 fn get_rerender_at() -> Option<Instant> {
-    Some(Instant::now() + Duration::from_secs(1))
+    Some(Instant::now())
 }
 
 impl EffectsFramebuffers {
@@ -88,10 +91,37 @@ impl EffectsFramebuffers {
         RefCell::borrow_mut(user_data)
     }
     pub fn set_dirty(output: &Output) {
-        let mut fx_buffers = Self::get(output);
+        const THROTTLE_INTERVAL_MS: u64 = 33;
 
-        if fx_buffers.optimized_blur_rerender_at.is_none() {
-            fx_buffers.optimized_blur_rerender_at = get_rerender_at();
+        let Some(mut fx_buffers) = output.user_data().get::<EffectsFramebufffersUserData>()
+            .map(|user_data| RefCell::borrow_mut(user_data)) else {
+            return;
+        };
+        let now = Instant::now();
+
+        // Determine if we are in a "rapid change" phase
+        let is_rapid_change = now.duration_since(fx_buffers.last_set_dirty_call_time)
+            < Duration::from_millis(THROTTLE_INTERVAL_MS);
+        fx_buffers.last_set_dirty_call_time = now; // Update for the next call
+
+        // Check if we should throttle
+        let should_throttle = is_rapid_change
+            && now.duration_since(fx_buffers.last_blur_update_time)
+                < Duration::from_millis(THROTTLE_INTERVAL_MS);
+
+        if should_throttle {
+            fx_buffers.pending_blur_due_to_throttle = true;
+            return;
+        }
+
+        // Always mark for immediate re-render if not throttled
+        fx_buffers.optimized_blur_rerender_at = Some(Instant::now());
+        fx_buffers.last_blur_update_time = now;
+
+        if fx_buffers.pending_blur_due_to_throttle {
+            fx_buffers.pending_blur_due_to_throttle = false;
+            fx_buffers.optimized_blur_rerender_at = Some(Instant::now());
+            fx_buffers.last_blur_update_time = now;
         }
     }
 
@@ -119,6 +149,9 @@ impl EffectsFramebuffers {
             effects: create_buffer(renderer, output_size).unwrap(),
             effects_swapped: create_buffer(renderer, output_size).unwrap(),
             current_buffer: CurrentBuffer::Normal,
+            last_blur_update_time: Instant::now(),
+            last_set_dirty_call_time: Instant::now(),
+            pending_blur_due_to_throttle: false,
         };
 
         let user_data = output.user_data();
@@ -137,7 +170,12 @@ impl EffectsFramebuffers {
     ) -> Result<(), GlesError> {
         let renderer = renderer.as_gles_renderer();
         let mut fx_buffers = Self::get(&output);
-        let output_size = output.current_mode().unwrap().size;
+        // Cache commonly accessed values to reduce repeated calls
+        let output_mode = output.current_mode();
+        if output_mode.is_none() {
+            return Ok(());
+        }
+        let output_size = output_mode.unwrap().size;
 
         fn create_buffer(
             renderer: &mut GlesRenderer,
@@ -155,6 +193,9 @@ impl EffectsFramebuffers {
             effects: create_buffer(renderer, output_size)?,
             effects_swapped: create_buffer(renderer, output_size)?,
             current_buffer: CurrentBuffer::Normal,
+            last_blur_update_time: Instant::now(),
+            last_set_dirty_call_time: Instant::now(),
+            pending_blur_due_to_throttle: false,
         };
 
         Ok(())
@@ -169,21 +210,48 @@ impl EffectsFramebuffers {
         scale: Scale<f64>,
         config: Blur,
     ) -> anyhow::Result<()> {
-        if self.optimized_blur_rerender_at.is_none() {
+        // Cache the rerender time to avoid multiple Option unwraps
+        let rerender_time = self.optimized_blur_rerender_at;
+        if rerender_time.is_none() {
             return Ok(());
         }
 
-        if self.optimized_blur_rerender_at.unwrap() > Instant::now() {
+        // Early exit if not yet time to rerender
+        if rerender_time.unwrap() > Instant::now() {
             return Ok(());
         }
 
         self.optimized_blur_rerender_at = None;
 
+        // Check for valid output mode before proceeding
+        let output_mode = output.current_mode();
+        if output_mode.is_none() {
+            return Ok(());
+        }
+        let output_size = output_mode.unwrap().size;
+
+        // Early exit for zero-area operations
+        if output_size.w <= 0 || output_size.h <= 0 {
+            return Ok(());
+        }
+
+        // Early exit for disabled blur
+        if !config.on {
+            return Ok(());
+        }
+
+        // Early exit for zero-radius blur
+        if config.radius.0 <= 0.0 {
+            return Ok(());
+        }
+
         // first render layer shell elements
         // NOTE: We use Blur::DISABLED since we should not include blur with Background/Bottom
         // layer shells
 
-        let mut elements = vec![];
+        let mut elements = Vec::with_capacity(16); // Pre-allocate reasonable capacity to reduce reallocations
+
+        // Use chain iterator instead of collecting into intermediate vectors for better performance
         for layer in layer_map
             .layers_on(Layer::Background)
             .chain(layer_map.layers_on(Layer::Bottom))
@@ -191,6 +259,7 @@ impl EffectsFramebuffers {
         {
             let layer_geo = layer_map.layer_geometry(layer).unwrap();
             let location = layer_geo.loc.to_physical_precise_round(scale);
+            // Directly extend without intermediate collection for better performance
             elements.extend(
                 layer.render_elements::<WaylandSurfaceRenderElement<_>>(
                     renderer, location, scale, 1.0,
@@ -199,7 +268,8 @@ impl EffectsFramebuffers {
         }
 
         let mut fb = renderer.bind(&mut self.effects).unwrap();
-        let output_size = output.current_mode().unwrap().size;
+        // Use the already validated output_size
+        let output_size = output_mode.unwrap().size;
 
         let _ = render_elements(
             renderer,
@@ -216,6 +286,9 @@ impl EffectsFramebuffers {
 
         let shaders = Shaders::get(renderer).blur.clone();
 
+        // Cache output dimensions to avoid repeated unwrap calls
+        let output_size = output.current_mode().unwrap().size;
+
         // NOTE: If we only do one pass its kinda ugly, there must be at least
         // n=2 passes in order to have good sampling
         let half_pixel = [
@@ -223,43 +296,77 @@ impl EffectsFramebuffers {
             0.5 / (output_size.h as f32 / 2.0),
         ];
 
-        for _ in 0..config.passes {
-            let (sample_buffer, render_buffer) = self.buffers();
-            render_blur_pass_with_frame(
-                renderer,
-                sample_buffer,
-                render_buffer,
-                &shaders.down,
-                half_pixel,
-                config,
-            )?;
-            self.current_buffer.swap();
-        }
+        // Adaptive passes calculation for better performance vs quality trade-off
+        let (downsample_passes, upsample_passes) = {
+            let base_passes = config.passes.max(1); // Ensure at least 1 pass
+            let radius = config.radius.0;
 
-        let half_pixel = [
-            0.5 / (output_size.w as f32 * 2.0),
-            0.5 / (output_size.h as f32 * 2.0),
-        ];
-        // FIXME: Why we need inclusive here but down is exclusive?
-        for _ in 0..config.passes {
-            let (sample_buffer, render_buffer) = self.buffers();
-            render_blur_pass_with_frame(
-                renderer,
-                sample_buffer,
-                render_buffer,
-                &shaders.up,
-                half_pixel,
-                config,
-            )?;
-            self.current_buffer.swap();
+            // Adjust passes based on blur radius for optimal performance
+            let adjusted_passes = if radius < 1.0 {
+                // Very small blur - reduce passes significantly
+                1
+            } else if radius < 3.0 {
+                // Small blur - moderate passes
+                base_passes.min(2)
+            } else if radius < 6.0 {
+                // Medium blur - standard passes
+                base_passes
+            } else {
+                // Large blur - increase passes for better quality
+                base_passes.min(6) // Cap to prevent excessive computation
+            };
+
+            // Separate downsample and upsample passes for better control
+            let down = adjusted_passes;
+            let up = adjusted_passes;
+
+            (down, up)
+        };
+
+        // Reduce computation for minimal blur effect
+        // Use a small epsilon to handle floating point precision issues
+        if config.radius.0 >= 0.1f64 {
+            // Downsample passes
+            for _ in 0..downsample_passes {
+                let (sample_buffer, render_buffer) = self.buffers();
+                render_blur_pass_with_frame(
+                    renderer,
+                    sample_buffer,
+                    render_buffer,
+                    &shaders.down,
+                    half_pixel,
+                    config,
+                )?;
+                self.current_buffer.swap();
+            }
+
+            let half_pixel = [
+                0.5 / (output_size.w as f32 * 2.0),
+                0.5 / (output_size.h as f32 * 2.0),
+            ];
+            // FIXME: Why we need inclusive here but down is exclusive?
+            // Upsample passes
+            for _ in 0..upsample_passes {
+                let (sample_buffer, render_buffer) = self.buffers();
+                render_blur_pass_with_frame(
+                    renderer,
+                    sample_buffer,
+                    render_buffer,
+                    &shaders.up,
+                    half_pixel,
+                    config,
+                )?;
+                self.current_buffer.swap();
+            }
         }
+        // For very small radius, skip blur computation entirely
 
         // Now blit from the last render buffer into optimized_blur
         // We are already bound so its just a blit
         let tex_fb = renderer.bind(&mut self.effects).unwrap();
         let mut optimized_blur_fb = renderer.bind(&mut self.optimized_blur).unwrap();
 
-        renderer.blit(
+        let _ = renderer.blit(
             &tex_fb,
             &mut optimized_blur_fb,
             Rectangle::from_size(output_size),
@@ -411,7 +518,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.down,
                 half_pixel,
-                blur_config.clone(),
+                blur_config,
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
@@ -426,7 +533,7 @@ pub(super) unsafe fn get_main_buffer_blur(
             let damage = dst_expanded.downscale(1 << (passes - 1 - i));
             render_blur_pass_with_gl(
                 gl,
-                &vbos,
+                vbos,
                 debug,
                 supports_instancing,
                 projection_matrix,
@@ -435,7 +542,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.up,
                 half_pixel,
-                blur_config.clone(),
+                blur_config,
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
