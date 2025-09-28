@@ -130,11 +130,6 @@ impl State {
                 .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
                 .unwrap();
 
-            if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
-                // Explicitly mark blur as dirty when background/bottom layer surface commits
-                EffectsFramebuffers::set_dirty(&output);
-            }
-
             if initial_configure_sent {
                 if is_mapped(surface) {
                     let was_unmapped = self.niri.unmapped_layer_surfaces.remove(surface);
@@ -238,6 +233,11 @@ impl State {
         let layer = map
             .layer_for_surface(surface, WindowSurfaceType::TOPLEVEL)
             .unwrap();
+
+        if matches!(layer.layer(), Layer::Background | Layer::Bottom) {
+            // Explicitly mark blur as dirty when background/bottom layer surface commits
+            EffectsFramebuffers::set_dirty(&output);
+        }
 
         if is_mapped(surface) {
             let was_unmapped = self.niri.unmapped_layer_surfaces.remove(surface);
