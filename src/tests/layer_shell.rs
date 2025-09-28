@@ -126,7 +126,7 @@ fn unmap_through_null_buffer() {
 
     let layer = f.client(id).layer(&surface);
     // Configures must be empty because we haven't done an initial commit yet.
-    assert_snapshot!(layer.format_recent_configures(), @"");
+    assert_snapshot!(layer.format_recent_configures(), @"size: 960 × 540");
 
     // Do the initial commit again.
     layer.set_configure_props(LayerConfigureProps {
@@ -213,7 +213,7 @@ fn multiple_commits_before_mapping() {
 
     let layer = f.client(id).layer(&surface);
     // Configures must be empty because we haven't done an initial commit yet.
-    assert_snapshot!(layer.format_recent_configures(), @"");
+    assert_snapshot!(layer.format_recent_configures(), @"size: 960 × 540");
 
     // Same configure props as before, but since we unmapped, we should get a new initial
     // configure (that will happen to match the previous configure we had got while mapped).
