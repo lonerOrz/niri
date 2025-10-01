@@ -1251,14 +1251,13 @@ impl<W: LayoutElement> Tile<W> {
 
         if let Some(open) = &self.open_animation {
             let renderer = renderer.as_gles_renderer();
-            let elements =
-                self.render_inner(renderer, Point::from((0., 0.)), focus_ring, target, output);
+            let elements = self.render_inner(renderer, location, focus_ring, target, output);
             let elements = elements.collect::<Vec<TileRenderElement<_>>>();
             match open.render(
                 renderer,
                 &elements,
                 self.animated_tile_size(),
-                location,
+                Point::from((0.0, 0.0)),
                 scale,
                 tile_alpha,
             ) {
