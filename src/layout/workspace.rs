@@ -481,7 +481,6 @@ impl<W: LayoutElement> Workspace<W> {
             window.set_preferred_scale_transform(self.scale, self.transform);
             window.output_enter(output);
             EffectsFramebuffers::set_dirty(output);
-            EffectsFramebuffers::set_dirty(output);
         }
     }
 
