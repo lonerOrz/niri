@@ -167,7 +167,18 @@ impl Element for BlurRenderElement {
         commit: Option<CommitCounter>,
     ) -> DamageSet<i32, Physical> {
         match self {
-            BlurRenderElement::Optimized { tex, .. } => tex.damage_since(scale, commit),
+            BlurRenderElement::Optimized { tex, .. } => {
+                if commit.is_none() {
+                    // This is the first frame for this element.
+                    // Instead of delegating to the inner TextureRenderElement's potentially
+                    // buggy initial damage calculation, just submit our entire geometry
+                    // as damage to ensure we get drawn.
+                    DamageSet::from_slice(&[self.geometry(scale)])
+                } else {
+                    // On subsequent frames, use the normal logic.
+                    tex.damage_since(scale, commit)
+                }
+            }
             BlurRenderElement::TrueBlur { config, .. } => {
                 let passes = config.passes;
                 let radius = config.radius.0 as f32;
