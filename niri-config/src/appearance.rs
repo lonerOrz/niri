@@ -355,6 +355,25 @@ impl Default for Blur {
     }
 }
 
+impl MergeWith<BlurRule> for Blur {
+    fn merge_with(&mut self, part: &BlurRule) {
+        self.on |= part.on;
+        if part.off {
+            self.on = false;
+        }
+
+        if let Some(x) = part.passes {
+            self.passes = x;
+        }
+        if let Some(x) = part.radius {
+            self.radius = x;
+        }
+        if let Some(x) = part.noise {
+            self.noise = x;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shadow {
     pub on: bool,

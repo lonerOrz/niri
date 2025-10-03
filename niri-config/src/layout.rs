@@ -5,7 +5,7 @@ use crate::appearance::{
     Blur, Border, FocusRing, InsertHint, Shadow, TabIndicator, DEFAULT_BACKGROUND_COLOR,
 };
 use crate::utils::{expect_only_children, Flag, MergeWith};
-use crate::{BorderRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
+use crate::{BorderRule, BlurRule, Color, FloatOrInt, InsertHintPart, ShadowRule, TabIndicatorPart};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
@@ -66,6 +66,7 @@ impl MergeWith<LayoutPart> for Layout {
             focus_ring,
             border,
             shadow,
+            blur,
             tab_indicator,
             insert_hint,
             always_center_single_column,
@@ -105,6 +106,8 @@ pub struct LayoutPart {
     pub border: Option<BorderRule>,
     #[knuffel(child)]
     pub shadow: Option<ShadowRule>,
+    #[knuffel(child)]
+    pub blur: Option<BlurRule>,
     #[knuffel(child)]
     pub tab_indicator: Option<TabIndicatorPart>,
     #[knuffel(child)]
