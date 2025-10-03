@@ -1,8 +1,10 @@
 use std::cell::{Cell, OnceCell, RefCell};
 
+use niri_config::utils::{Flag, MergeWith as _};
 use niri_config::workspace::WorkspaceName;
 use niri_config::{
-    FloatOrInt, OutputName, TabIndicatorLength, TabIndicatorPosition, WorkspaceReference,
+    CenterFocusedColumn, FloatOrInt, OutputName, Struts, TabIndicatorLength, TabIndicatorPosition,
+    WorkspaceReference,
 };
 use proptest::prelude::*;
 use proptest_derive::Arbitrary;
@@ -400,7 +402,7 @@ fn arbitrary_column_display() -> impl Strategy<Value = ColumnDisplay> {
     prop_oneof![Just(ColumnDisplay::Normal), Just(ColumnDisplay::Tabbed)]
 }
 
-#[derive(Debug, Clone, Copy, Arbitrary)]
+#[derive(Debug, Clone, Arbitrary)]
 enum Op {
     AddOutput(#[proptest(strategy = "1..=5usize")] usize),
     AddScaledOutput {
@@ -408,18 +410,34 @@ enum Op {
         id: usize,
         #[proptest(strategy = "arbitrary_scale()")]
         scale: f64,
+        #[proptest(strategy = "prop::option::of(arbitrary_layout_part().prop_map(Box::new))")]
+        layout_config: Option<Box<niri_config::LayoutPart>>,
     },
     RemoveOutput(#[proptest(strategy = "1..=5usize")] usize),
     FocusOutput(#[proptest(strategy = "1..=5usize")] usize),
+    UpdateOutputLayoutConfig {
+        #[proptest(strategy = "1..=5usize")]
+        id: usize,
+        #[proptest(strategy = "prop::option::of(arbitrary_layout_part().prop_map(Box::new))")]
+        layout_config: Option<Box<niri_config::LayoutPart>>,
+    },
     AddNamedWorkspace {
         #[proptest(strategy = "1..=5usize")]
         ws_name: usize,
         #[proptest(strategy = "prop::option::of(1..=5usize)")]
         output_name: Option<usize>,
+        #[proptest(strategy = "prop::option::of(arbitrary_layout_part().prop_map(Box::new))")]
+        layout_config: Option<Box<niri_config::LayoutPart>>,
     },
     UnnameWorkspace {
         #[proptest(strategy = "1..=5usize")]
         ws_name: usize,
+    },
+    UpdateWorkspaceLayoutConfig {
+        #[proptest(strategy = "1..=5usize")]
+        ws_name: usize,
+        #[proptest(strategy = "prop::option::of(arbitrary_layout_part().prop_map(Box::new))")]
+        layout_config: Option<Box<niri_config::LayoutPart>>,
     },
     AddWindow {
         params: TestWindowParams,
@@ -725,6 +743,10 @@ enum Op {
         window: usize,
     },
     ToggleOverview,
+    UpdateConfig {
+        #[proptest(strategy = "arbitrary_layout_part().prop_map(Box::new)")]
+        layout_config: Box<niri_config::LayoutPart>,
+    },
 }
 
 impl Op {
@@ -761,9 +783,13 @@ impl Op {
                     model: None,
                     serial: None,
                 });
-                layout.add_output(output.clone());
+                layout.add_output(output.clone(), None);
             }
-            Op::AddScaledOutput { id, scale } => {
+            Op::AddScaledOutput {
+                id,
+                scale,
+                layout_config,
+            } => {
                 let name = format!("output{id}");
                 if layout.outputs().any(|o| o.name() == name) {
                     return;
@@ -794,7 +820,7 @@ impl Op {
                     model: None,
                     serial: None,
                 });
-                layout.add_output(output.clone());
+                layout.add_output(output.clone(), layout_config.map(|x| *x));
             }
             Op::RemoveOutput(id) => {
                 let name = format!("output{id}");
@@ -812,17 +838,41 @@ impl Op {
 
                 layout.focus_output(&output);
             }
+            Op::UpdateOutputLayoutConfig { id, layout_config } => {
+                let name = format!("output{id}");
+                let Some(mon) = layout.monitors_mut().find(|m| m.output_name() == &name) else {
+                    return;
+                };
+
+                mon.update_layout_config(layout_config.map(|x| *x));
+            }
             Op::AddNamedWorkspace {
                 ws_name,
                 output_name,
+                layout_config,
             } => {
                 layout.ensure_named_workspace(&WorkspaceConfig {
                     name: WorkspaceName(format!("ws{ws_name}")),
                     open_on_output: output_name.map(|name| format!("output{name}")),
+                    layout: layout_config.map(|x| niri_config::WorkspaceLayoutPart(*x)),
                 });
             }
             Op::UnnameWorkspace { ws_name } => {
                 layout.unname_workspace(&format!("ws{ws_name}"));
+            }
+            Op::UpdateWorkspaceLayoutConfig {
+                ws_name,
+                layout_config,
+            } => {
+                let ws_name = format!("ws{ws_name}");
+                let Some(ws) = layout
+                    .workspaces_mut()
+                    .find(|ws| ws.name() == Some(&ws_name))
+                else {
+                    return;
+                };
+
+                ws.update_layout_config(layout_config.map(|x| *x));
             }
             Op::SetWorkspaceName {
                 new_ws_name,
@@ -1243,7 +1293,7 @@ impl Op {
                     return;
                 };
 
-                layout.move_workspace_to_output_by_id(old_idx, Some(old_output), output);
+                layout.move_workspace_to_output_by_id(old_idx, Some(old_output), &output);
             }
             Op::SwitchPresetColumnWidth => layout.toggle_width(true),
             Op::SwitchPresetColumnWidthBack => layout.toggle_width(false),
@@ -1548,12 +1598,20 @@ impl Op {
             Op::ToggleOverview => {
                 layout.toggle_overview();
             }
+            Op::UpdateConfig { layout_config } => {
+                let options = Options {
+                    layout: niri_config::Layout::from_part(&layout_config),
+                    ..Default::default()
+                };
+
+                layout.update_options(options);
+            }
         }
     }
 }
 
 #[track_caller]
-fn check_ops_on_layout(layout: &mut Layout<TestWindow>, ops: &[Op]) {
+fn check_ops_on_layout(layout: &mut Layout<TestWindow>, ops: impl IntoIterator<Item = Op>) {
     for op in ops {
         op.apply(layout);
         layout.verify_invariants();
@@ -1561,14 +1619,17 @@ fn check_ops_on_layout(layout: &mut Layout<TestWindow>, ops: &[Op]) {
 }
 
 #[track_caller]
-fn check_ops(ops: &[Op]) -> Layout<TestWindow> {
+fn check_ops(ops: impl IntoIterator<Item = Op>) -> Layout<TestWindow> {
     let mut layout = Layout::default();
     check_ops_on_layout(&mut layout, ops);
     layout
 }
 
 #[track_caller]
-fn check_ops_with_options(options: Options, ops: &[Op]) -> Layout<TestWindow> {
+fn check_ops_with_options(
+    options: Options,
+    ops: impl IntoIterator<Item = Op>,
+) -> Layout<TestWindow> {
     let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
     check_ops_on_layout(&mut layout, ops);
     layout
@@ -1594,6 +1655,7 @@ fn operations_dont_panic() {
         Op::AddNamedWorkspace {
             ws_name: 1,
             output_name: Some(1),
+            layout_config: None,
         },
         Op::UnnameWorkspace { ws_name: 1 },
         Op::AddWindow {
@@ -1667,17 +1729,17 @@ fn operations_dont_panic() {
         Op::ToggleColumnTabbedDisplay,
     ];
 
-    for third in every_op {
-        for second in every_op {
-            for first in every_op {
+    for third in &every_op {
+        for second in &every_op {
+            for first in &every_op {
                 // eprintln!("{first:?}, {second:?}, {third:?}");
 
                 let mut layout = Layout::default();
-                first.apply(&mut layout);
+                first.clone().apply(&mut layout);
                 layout.verify_invariants();
-                second.apply(&mut layout);
+                second.clone().apply(&mut layout);
                 layout.verify_invariants();
-                third.apply(&mut layout);
+                third.clone().apply(&mut layout);
                 layout.verify_invariants();
             }
         }
@@ -1741,6 +1803,7 @@ fn operations_from_starting_state_dont_panic() {
         Op::AddNamedWorkspace {
             ws_name: 1,
             output_name: Some(1),
+            layout_config: None,
         },
         Op::UnnameWorkspace { ws_name: 1 },
         Op::AddWindow {
@@ -1842,21 +1905,22 @@ fn operations_from_starting_state_dont_panic() {
         Op::ToggleColumnTabbedDisplay,
     ];
 
-    for third in every_op {
-        for second in every_op {
-            for first in every_op {
+    for third in &every_op {
+        for second in &every_op {
+            for first in &every_op {
                 // eprintln!("{first:?}, {second:?}, {third:?}");
 
                 let mut layout = Layout::default();
-                for op in setup_ops {
-                    op.apply(&mut layout);
+                for op in &setup_ops {
+                    op.clone().apply(&mut layout);
                 }
 
-                first.apply(&mut layout);
+                let mut layout = Layout::default();
+                first.clone().apply(&mut layout);
                 layout.verify_invariants();
-                second.apply(&mut layout);
+                second.clone().apply(&mut layout);
                 layout.verify_invariants();
-                third.apply(&mut layout);
+                third.clone().apply(&mut layout);
                 layout.verify_invariants();
             }
         }
@@ -1881,7 +1945,7 @@ fn primary_active_workspace_idx_not_updated_on_output_add() {
         Op::AddOutput(2),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -1895,7 +1959,7 @@ fn window_closed_on_previous_workspace() {
         Op::CloseWindow(0),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -1909,7 +1973,7 @@ fn removing_output_must_keep_empty_focus_on_primary() {
         Op::RemoveOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -1939,7 +2003,7 @@ fn move_to_workspace_by_idx_does_not_leave_empty_workspaces() {
         },
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -1966,7 +2030,7 @@ fn empty_workspaces_dont_move_back_to_original_output() {
         Op::AddOutput(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -1989,7 +2053,7 @@ fn named_workspaces_dont_update_original_output_on_adding_window() {
         Op::AddOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let (mon, _, ws) = layout
         .workspaces()
         .find(|(_, _, ws)| ws.name().is_some())
@@ -2014,7 +2078,7 @@ fn workspaces_update_original_output_on_moving_to_same_output() {
         Op::AddOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let (mon, _, ws) = layout
         .workspaces()
         .find(|(_, _, ws)| ws.name().is_some())
@@ -2042,7 +2106,7 @@ fn workspaces_update_original_output_on_moving_to_same_monitor() {
         Op::AddOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let (mon, _, ws) = layout
         .workspaces()
         .find(|(_, _, ws)| ws.name().is_some())
@@ -2066,10 +2130,10 @@ fn large_negative_height_change() {
     ];
 
     let mut options = Options::default();
-    options.border.off = false;
-    options.border.width = FloatOrInt(1.);
+    options.layout.border.off = false;
+    options.layout.border.width = 1.;
 
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2085,10 +2149,10 @@ fn large_max_size() {
     ];
 
     let mut options = Options::default();
-    options.border.off = false;
-    options.border.width = FloatOrInt(1.);
+    options.layout.border.off = false;
+    options.layout.border.width = 1.;
 
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2102,7 +2166,7 @@ fn workspace_cleanup_during_switch() {
         Op::CloseWindow(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2123,7 +2187,7 @@ fn workspace_transfer_during_switch() {
         Op::AddOutput(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2139,7 +2203,7 @@ fn workspace_transfer_during_switch_from_last() {
         Op::AddOutput(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2156,7 +2220,7 @@ fn workspace_transfer_during_switch_gets_cleaned_up() {
         Op::AddOutput(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2171,7 +2235,7 @@ fn move_workspace_to_output() {
         Op::MoveWorkspaceToOutput(2),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal {
         monitors,
@@ -2207,7 +2271,7 @@ fn open_right_of_on_different_workspace() {
         },
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -2244,10 +2308,13 @@ fn open_right_of_on_different_workspace_ewaf() {
     ];
 
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let layout = check_ops_with_options(options, &ops);
+    let layout = check_ops_with_options(options, ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -2272,15 +2339,17 @@ fn removing_all_outputs_preserves_empty_named_workspaces() {
         Op::AddNamedWorkspace {
             ws_name: 1,
             output_name: None,
+            layout_config: None,
         },
         Op::AddNamedWorkspace {
             ws_name: 2,
             output_name: None,
+            layout_config: None,
         },
         Op::RemoveOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::NoOutputs { workspaces } = layout.monitor_set else {
         unreachable!()
@@ -2292,8 +2361,9 @@ fn removing_all_outputs_preserves_empty_named_workspaces() {
 #[test]
 fn config_change_updates_cached_sizes() {
     let mut config = Config::default();
-    config.layout.border.off = false;
-    config.layout.border.width = FloatOrInt(2.);
+    let border = &mut config.layout.border;
+    border.off = false;
+    border.width = 2.;
 
     let mut layout = Layout::new(Clock::default(), &config);
 
@@ -2305,7 +2375,7 @@ fn config_change_updates_cached_sizes() {
     }
     .apply(&mut layout);
 
-    config.layout.border.width = FloatOrInt(4.);
+    config.layout.border.width = 4.;
     layout.update_config(&config);
 
     layout.verify_invariants();
@@ -2368,7 +2438,7 @@ fn set_window_height_recomputes_to_auto() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2401,7 +2471,7 @@ fn one_window_in_column_becomes_weight_1() {
         Op::CloseWindow(1),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2422,15 +2492,18 @@ fn fixed_height_takes_max_non_auto_into_account() {
     ];
 
     let options = Options {
-        border: niri_config::Border {
-            off: false,
-            width: niri_config::FloatOrInt(4.),
+        layout: niri_config::Layout {
+            border: niri_config::Border {
+                off: false,
+                width: 4.,
+                ..Default::default()
+            },
+            gaps: 0.,
             ..Default::default()
         },
-        gaps: 0.,
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2449,7 +2522,7 @@ fn start_interactive_move_then_remove_window() {
         Op::CloseWindow(0),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2477,7 +2550,7 @@ fn interactive_move_onto_empty_output() {
         Op::InteractiveMoveEnd { window: 0 },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2506,10 +2579,13 @@ fn interactive_move_onto_empty_output_ewaf() {
     ];
 
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2538,7 +2614,7 @@ fn interactive_move_onto_last_workspace() {
         Op::InteractiveMoveEnd { window: 0 },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2567,10 +2643,13 @@ fn interactive_move_onto_first_empty_workspace() {
         Op::InteractiveMoveEnd { window: 1 },
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2588,7 +2667,7 @@ fn output_active_workspace_is_preserved() {
         Op::AddOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -2613,7 +2692,7 @@ fn output_active_workspace_is_preserved_with_other_outputs() {
         Op::AddOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -2628,12 +2707,13 @@ fn named_workspace_to_output() {
         Op::AddNamedWorkspace {
             ws_name: 1,
             output_name: None,
+            layout_config: None,
         },
         Op::AddOutput(1),
         Op::MoveWorkspaceToOutput(1),
         Op::FocusWorkspaceUp,
     ];
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2643,15 +2723,19 @@ fn named_workspace_to_output_ewaf() {
         Op::AddNamedWorkspace {
             ws_name: 1,
             output_name: Some(2),
+            layout_config: None,
         },
         Op::AddOutput(1),
         Op::AddOutput(2),
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2667,10 +2751,13 @@ fn move_window_to_empty_workspace_above_first() {
         Op::MoveWorkspaceDown,
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2684,10 +2771,13 @@ fn move_window_to_different_output() {
         Op::MoveWorkspaceToOutput(2),
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2700,10 +2790,13 @@ fn close_window_empty_ws_above_first() {
         Op::CloseWindow(1),
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2717,10 +2810,13 @@ fn add_and_remove_output() {
         Op::RemoveOutput(2),
     ];
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -2732,9 +2828,12 @@ fn switch_ewaf_on() {
         },
     ];
 
-    let mut layout = check_ops(&ops);
+    let mut layout = check_ops(ops);
     layout.update_options(Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     });
     layout.verify_invariants();
@@ -2750,10 +2849,13 @@ fn switch_ewaf_off() {
     ];
 
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let mut layout = check_ops_with_options(options, &ops);
+    let mut layout = check_ops_with_options(options, ops);
     layout.update_options(Options::default());
     layout.verify_invariants();
 }
@@ -2784,7 +2886,7 @@ fn interactive_move_drop_on_other_output_during_animation() {
         Op::RemoveOutput(4),
         Op::InteractiveMoveEnd { window: 3 },
     ];
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2817,7 +2919,7 @@ fn add_window_next_to_only_interactively_moved_without_outputs() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2846,7 +2948,66 @@ fn interactive_move_toggle_floating_ends_dnd_gesture() {
         Op::InteractiveMoveEnd { window: 2 },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
+}
+
+#[test]
+fn interactive_move_from_workspace_with_layout_config() {
+    let ops = [
+        Op::AddNamedWorkspace {
+            ws_name: 1,
+            output_name: Some(2),
+            layout_config: Some(Box::new(niri_config::LayoutPart {
+                border: Some(niri_config::BorderRule {
+                    on: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        },
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::InteractiveMoveBegin {
+            window: 2,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        Op::InteractiveMoveUpdate {
+            window: 2,
+            dx: 0.0,
+            dy: 3586.692842955048,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        // Now remove and add the output. It will have the same workspace.
+        Op::RemoveOutput(1),
+        Op::AddOutput(1),
+        Op::InteractiveMoveUpdate {
+            window: 2,
+            dx: 0.0,
+            dy: 0.0,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+        // Now move onto a different workspace.
+        Op::FocusWorkspaceDown,
+        Op::CompleteAnimations,
+        Op::InteractiveMoveUpdate {
+            window: 2,
+            dx: 0.0,
+            dy: 0.0,
+            output_idx: 1,
+            px: 0.0,
+            py: 0.0,
+        },
+    ];
+
+    check_ops(ops);
 }
 
 #[test]
@@ -2859,7 +3020,7 @@ fn set_width_fixed_negative() {
         Op::ToggleWindowFloating { id: Some(3) },
         Op::SetColumnWidth(SizeChange::SetFixed(-100)),
     ];
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2875,7 +3036,7 @@ fn set_height_fixed_negative() {
             change: SizeChange::SetFixed(-100),
         },
     ];
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2896,7 +3057,7 @@ fn interactive_resize_to_negative() {
             dy: -10000.,
         },
     ];
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2910,7 +3071,7 @@ fn windows_on_other_workspaces_remain_activated() {
         Op::Refresh { is_active: true },
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let (_, win) = layout.windows().next().unwrap();
     assert!(win.0.pending_activated.get());
 }
@@ -2934,7 +3095,7 @@ fn stacking_add_parent_brings_up_child() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2963,7 +3124,7 @@ fn stacking_add_parent_brings_up_descendants() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -2999,7 +3160,7 @@ fn stacking_activate_brings_up_descendants() {
         Op::FocusWindow(0),
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -3024,7 +3185,7 @@ fn stacking_set_parent_brings_up_child() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -3042,7 +3203,7 @@ fn move_window_to_workspace_with_different_active_output() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -3055,7 +3216,7 @@ fn set_first_workspace_name() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -3069,10 +3230,13 @@ fn set_first_workspace_name_ewaf() {
     ];
 
     let options = Options {
-        empty_workspace_above_first: true,
+        layout: niri_config::Layout {
+            empty_workspace_above_first: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
-    check_ops_with_options(options, &ops);
+    check_ops_with_options(options, ops);
 }
 
 #[test]
@@ -3089,7 +3253,7 @@ fn set_last_workspace_name() {
         },
     ];
 
-    check_ops(&ops);
+    check_ops(ops);
 }
 
 #[test]
@@ -3116,7 +3280,7 @@ fn move_workspace_to_same_monitor_doesnt_reorder() {
         },
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let counts: Vec<_> = layout
         .workspaces()
         .map(|(_, _, ws)| ws.windows().count())
@@ -3144,7 +3308,7 @@ fn removing_window_above_preserves_focused_window() {
         Op::CloseWindow(0),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
     let win = layout.focus().unwrap();
     assert_eq!(win.0.id, 1);
 }
@@ -3160,20 +3324,26 @@ fn preset_column_width_fixed_correct_with_border() {
     ];
 
     let options = Options {
-        preset_column_widths: vec![PresetSize::Fixed(500)],
+        layout: niri_config::Layout {
+            preset_column_widths: vec![PresetSize::Fixed(500)],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let mut layout = check_ops_with_options(options, &ops);
+    let mut layout = check_ops_with_options(options, ops);
 
     let win = layout.windows().next().unwrap().1;
     assert_eq!(win.requested_size().unwrap().w, 500);
 
     // Add border.
     let options = Options {
-        preset_column_widths: vec![PresetSize::Fixed(500)],
-        border: niri_config::Border {
-            off: false,
-            width: FloatOrInt(5.),
+        layout: niri_config::Layout {
+            preset_column_widths: vec![PresetSize::Fixed(500)],
+            border: niri_config::Border {
+                off: false,
+                width: 5.,
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Default::default()
@@ -3206,10 +3376,13 @@ fn preset_column_width_reset_after_set_width() {
     ];
 
     let options = Options {
-        preset_column_widths: vec![PresetSize::Fixed(500), PresetSize::Fixed(1000)],
+        layout: niri_config::Layout {
+            preset_column_widths: vec![PresetSize::Fixed(500), PresetSize::Fixed(1000)],
+            ..Default::default()
+        },
         ..Default::default()
     };
-    let layout = check_ops_with_options(options, &ops);
+    let layout = check_ops_with_options(options, ops);
     let win = layout.windows().next().unwrap().1;
     assert_eq!(win.requested_size().unwrap().w, 500);
 }
@@ -3253,7 +3426,7 @@ fn move_column_to_workspace_unfocused_with_multiple_monitors() {
         Op::FocusOutput(1),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     assert_eq!(layout.active_workspace().unwrap().name().unwrap(), "ws102");
 
@@ -3291,7 +3464,7 @@ fn move_column_to_workspace_down_focus_false_on_floating_window() {
         Op::MoveColumnToWorkspaceDown(false),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -3314,7 +3487,7 @@ fn move_column_to_workspace_focus_false_on_floating_window() {
         Op::MoveColumnToWorkspace(1, false),
     ];
 
-    let layout = check_ops(&ops);
+    let layout = check_ops(ops);
 
     let MonitorSet::Normal { monitors, .. } = layout.monitor_set else {
         unreachable!()
@@ -3404,11 +3577,12 @@ fn arbitrary_tab_indicator_position() -> impl Strategy<Value = TabIndicatorPosit
 prop_compose! {
     fn arbitrary_focus_ring()(
         off in any::<bool>(),
-        width in arbitrary_spacing(),
-    ) -> niri_config::FocusRing {
-        niri_config::FocusRing {
+        width in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
+    ) -> niri_config::BorderRule {
+        niri_config::BorderRule {
             off,
-            width: FloatOrInt(width),
+            on: !off,
+            width,
             ..Default::default()
         }
     }
@@ -3417,11 +3591,12 @@ prop_compose! {
 prop_compose! {
     fn arbitrary_border()(
         off in any::<bool>(),
-        width in arbitrary_spacing(),
-    ) -> niri_config::Border {
-        niri_config::Border {
+        width in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
+    ) -> niri_config::BorderRule {
+        niri_config::BorderRule {
             off,
-            width: FloatOrInt(width),
+            on: !off,
+            width,
             ..Default::default()
         }
     }
@@ -3429,12 +3604,13 @@ prop_compose! {
 
 prop_compose! {
     fn arbitrary_shadow()(
-        on in any::<bool>(),
-        width in arbitrary_spacing(),
-    ) -> niri_config::Shadow {
-        niri_config::Shadow {
-            on,
-            softness: FloatOrInt(width),
+        off in any::<bool>(),
+        softness in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
+    ) -> niri_config::ShadowRule {
+        niri_config::ShadowRule {
+            off,
+            on: !off,
+            softness,
             ..Default::default()
         }
     }
@@ -3443,20 +3619,22 @@ prop_compose! {
 prop_compose! {
     fn arbitrary_tab_indicator()(
         off in any::<bool>(),
-        hide_when_single_tab in any::<bool>(),
-        place_within_column in any::<bool>(),
-        width in arbitrary_spacing(),
-        gap in arbitrary_spacing_neg(),
-        length in (0f64..2f64),
-        position in arbitrary_tab_indicator_position(),
-    ) -> niri_config::TabIndicator {
-        niri_config::TabIndicator {
+        hide_when_single_tab in prop::option::of(any::<bool>().prop_map(Flag)),
+        place_within_column in prop::option::of(any::<bool>().prop_map(Flag)),
+        width in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
+        gap in prop::option::of(arbitrary_spacing_neg().prop_map(FloatOrInt)),
+        length in prop::option::of((0f64..2f64)
+            .prop_map(|x| TabIndicatorLength { total_proportion: Some(x) })),
+        position in prop::option::of(arbitrary_tab_indicator_position()),
+    ) -> niri_config::TabIndicatorPart {
+        niri_config::TabIndicatorPart {
             off,
+            on: !off,
             hide_when_single_tab,
             place_within_column,
-            width: FloatOrInt(width),
-            gap: FloatOrInt(gap),
-            length: TabIndicatorLength { total_proportion: Some(length) },
+            width,
+            gap,
+            length,
             position,
             ..Default::default()
         }
@@ -3464,18 +3642,18 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn arbitrary_options()(
-        gaps in arbitrary_spacing(),
-        struts in arbitrary_struts(),
-        focus_ring in arbitrary_focus_ring(),
-        border in arbitrary_border(),
-        shadow in arbitrary_shadow(),
-        tab_indicator in arbitrary_tab_indicator(),
-        center_focused_column in arbitrary_center_focused_column(),
-        always_center_single_column in any::<bool>(),
-        empty_workspace_above_first in any::<bool>(),
-    ) -> Options {
-        Options {
+    fn arbitrary_layout_part()(
+        gaps in prop::option::of(arbitrary_spacing().prop_map(FloatOrInt)),
+        struts in prop::option::of(arbitrary_struts()),
+        focus_ring in prop::option::of(arbitrary_focus_ring()),
+        border in prop::option::of(arbitrary_border()),
+        shadow in prop::option::of(arbitrary_shadow()),
+        tab_indicator in prop::option::of(arbitrary_tab_indicator()),
+        center_focused_column in prop::option::of(arbitrary_center_focused_column()),
+        always_center_single_column in prop::option::of(any::<bool>().prop_map(Flag)),
+        empty_workspace_above_first in prop::option::of(any::<bool>().prop_map(Flag)),
+    ) -> niri_config::LayoutPart {
+        niri_config::LayoutPart {
             gaps,
             struts,
             center_focused_column,
@@ -3504,15 +3682,14 @@ proptest! {
     #[test]
     fn random_operations_dont_panic(
         ops: Vec<Op>,
-        options in arbitrary_options(),
-        post_options in prop::option::of(arbitrary_options()),
+        layout_config in arbitrary_layout_part(),
     ) {
         // eprintln!("{ops:?}");
-        let mut layout = check_ops_with_options(options, &ops);
+        let options = Options {
+            layout: niri_config::Layout::from_part(&layout_config),
+            ..Default::default()
+        };
 
-        if let Some(post_options) = post_options {
-            layout.update_options(post_options);
-            layout.verify_invariants();
-        }
+        check_ops_with_options(options, ops);
     }
 }
