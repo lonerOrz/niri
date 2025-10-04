@@ -185,7 +185,7 @@ impl Element for BlurRenderElement {
 
                 // Since the blur element samples from around itself, we must expand the damage it
                 // induces to include any potential changes.
-                let mut geometry = Rectangle::from_size(self.geometry(scale).size);
+                let mut geometry = self.geometry(scale);
                 let size = (2f32.powi(passes as i32 + 1) * radius).ceil() as i32;
                 geometry.loc -= Point::from((size, size));
                 geometry.size += Size::from((size, size)).upscale(2);
