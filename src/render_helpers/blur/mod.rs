@@ -518,7 +518,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.down,
                 half_pixel,
-                blur_config,
+                blur_config.clone(),
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
@@ -533,7 +533,7 @@ pub(super) unsafe fn get_main_buffer_blur(
             let damage = dst_expanded.downscale(1 << (passes - 1 - i));
             render_blur_pass_with_gl(
                 gl,
-                vbos,
+                &vbos,
                 debug,
                 supports_instancing,
                 projection_matrix,
@@ -542,7 +542,7 @@ pub(super) unsafe fn get_main_buffer_blur(
                 scale,
                 &shaders.up,
                 half_pixel,
-                blur_config,
+                blur_config.clone(),
                 damage,
             )?;
             fx_buffers.current_buffer.swap();
@@ -885,8 +885,8 @@ unsafe fn render_blur_pass_with_gl(
     {
         gl.Enable(ffi::BLEND);
         gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _);
-        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
+        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
     }
 
     Ok(())
