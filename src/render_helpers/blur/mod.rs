@@ -420,6 +420,27 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     let (sample_buffer, _) = fx_buffers.buffers();
 
+    // Check GLES version for BlitFramebuffer support
+    let gles_version_str = gl.GetString(ffi::VERSION);
+    let gles_version = std::ffi::CStr::from_ptr(gles_version_str as *const i8)
+        .to_str()
+        .unwrap_or("Unknown GLES Version");
+
+    let major_version = gles_version
+        .find("OpenGL ES ") // Find the start of the version part
+        .and_then(|idx| gles_version.get(idx + "OpenGL ES ".len()..)) // Get the substring after "OpenGL ES "
+        .and_then(|s| s.split('.').next()) // Get the major version part (e.g., "3" from "3.2")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(2); // Default to 2 if parsing fails
+
+    if major_version < 3 {
+        error!(
+            "TrueBlur requires GLES 3.0 for blitting, but found GLES version: {}",
+            gles_version
+        );
+        return Err(GlesError::BlitError);
+    }
+
     // First get a fbo for the texture we are about to read into
     let mut sample_fbo = 0u32;
     {
