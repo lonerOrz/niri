@@ -1279,8 +1279,11 @@ impl<W: LayoutElement> Tile<W> {
         // being outside the monitor or obscured by a solid colored bar, but it is visible under
         // semitransparent bars in maximized state (which is a bit weird) and in the overview (also
         // a bit weird).
-        let elem = (focus_ring && expanded_progress < 1.)
-            .then(|| self.focus_ring.render(renderer, location).map(Into::into));
+        let elem = (focus_ring && expanded_progress < 1.).then(|| {
+            self.focus_ring
+                .render(renderer, location)
+                .map(Into::<TileRenderElement<R>>::into)
+        });
         let rv = rv.chain(elem.into_iter().flatten());
 
         let elem = (expanded_progress < 1.)
