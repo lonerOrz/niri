@@ -476,10 +476,6 @@ pub(super) unsafe fn get_main_buffer_blur(
             let dst_x1 = src_x1;
             let dst_y1 = src_y1;
 
-            let error = gl.GetError();
-            if error != ffi::NO_ERROR {
-                error!("OpenGL error before BlitFramebuffer (TTY): {:x}", error);
-            }
             gl.BlitFramebuffer(
                 src_x0,
                 src_y0,
@@ -492,25 +488,14 @@ pub(super) unsafe fn get_main_buffer_blur(
                 ffi::COLOR_BUFFER_BIT,
                 ffi::LINEAR,
             );
-            let error = gl.GetError();
-            if error != ffi::NO_ERROR {
-                error!("OpenGL error after BlitFramebuffer (TTY): {:x}", error);
-            }
         } else {
-            let fb_height = tex_size.h;
-
-            let dst_y0 = dst_expanded.loc.y + dst_expanded.size.h;
-            let dst_y1 = dst_expanded.loc.y;
-
             let src_x0 = dst_expanded.loc.x;
             let src_x1 = dst_expanded.loc.x + dst_expanded.size.w;
-            let src_y0 = fb_height - dst_y0;
-            let src_y1 = fb_height - dst_y1;
+            let src_y0 = dst_expanded.loc.y;
+            let src_y1 = dst_expanded.loc.y + dst_expanded.size.h;
+            let dst_y0 = dst_expanded.loc.y;
+            let dst_y1 = dst_expanded.loc.y + dst_expanded.size.h;
 
-            let error = gl.GetError();
-            if error != ffi::NO_ERROR {
-                error!("OpenGL error before BlitFramebuffer (non-TTY): {:x}", error);
-            }
             gl.BlitFramebuffer(
                 src_x0,
                 src_y0,
@@ -523,10 +508,6 @@ pub(super) unsafe fn get_main_buffer_blur(
                 ffi::COLOR_BUFFER_BIT,
                 ffi::LINEAR,
             );
-            let error = gl.GetError();
-            if error != ffi::NO_ERROR {
-                error!("OpenGL error after BlitFramebuffer (non-TTY): {:x}", error);
-            }
         }
 
         if gl.GetError() == ffi::INVALID_OPERATION {
