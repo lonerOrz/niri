@@ -93,63 +93,89 @@ impl BlurShader {
             Ok(BlurShaderVariant {
                 normal: BlurShaderProgram {
                     program,
-                    uniform_tex: gl
-                        .GetUniformLocation(program, tex.as_ptr() as *const ffi::types::GLchar),
-                    uniform_matrix: gl
-                        .GetUniformLocation(program, matrix.as_ptr() as *const ffi::types::GLchar),
-                    uniform_tex_matrix: gl.GetUniformLocation(
-                        program,
-                        tex_matrix.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_alpha: gl
-                        .GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
-                    uniform_radius: gl
-                        .GetUniformLocation(program, radius.as_ptr() as *const ffi::types::GLchar),
-                    uniform_half_pixel: gl.GetUniformLocation(
-                        program,
-                        half_pixel.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    attrib_vert: gl
-                        .GetAttribLocation(program, vert.as_ptr() as *const ffi::types::GLchar),
-                    attrib_vert_position: gl.GetAttribLocation(
-                        program,
-                        vert_position.as_ptr() as *const ffi::types::GLchar,
-                    ),
+                    uniform_tex: {
+                        let loc = gl.GetUniformLocation(program, tex.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'tex' not found in blur shader program (normal)");
+                        loc
+                    },
+                    uniform_matrix: {
+                        let loc = gl.GetUniformLocation(program, matrix.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'matrix' not found in blur shader program (normal)");
+                        loc
+                    },
+                    uniform_tex_matrix: {
+                        let loc = gl.GetUniformLocation(program, tex_matrix.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'tex_matrix' not found in blur shader program (normal)");
+                        loc
+                    },
+                    uniform_alpha: {
+                        let loc = gl.GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'alpha' not found in blur shader program (normal)");
+                        loc
+                    },
+                    uniform_radius: {
+                        let loc = gl.GetUniformLocation(program, radius.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'radius' not found in blur shader program (normal)");
+                        loc
+                    },
+                    uniform_half_pixel: {
+                        let loc = gl.GetUniformLocation(program, half_pixel.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'half_pixel' not found in blur shader program (normal)");
+                        loc
+                    },
+                    attrib_vert: {
+                        let loc = gl.GetAttribLocation(program, vert.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Attribute 'vert' not found in blur shader program (normal)");
+                        loc
+                    },
+                    attrib_vert_position: {
+                        let loc = gl.GetAttribLocation(program, vert_position.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Attribute 'vert_position' not found in blur shader program (normal)");
+                        loc
+                    },
                 },
                 debug: BlurShaderProgram {
                     program: debug_program,
-                    uniform_tex: gl.GetUniformLocation(
-                        debug_program,
-                        tex.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_matrix: gl.GetUniformLocation(
-                        debug_program,
-                        matrix.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_tex_matrix: gl.GetUniformLocation(
-                        debug_program,
-                        tex_matrix.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_alpha: gl.GetUniformLocation(
-                        debug_program,
-                        alpha.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_radius: gl.GetUniformLocation(
-                        debug_program,
-                        radius.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    uniform_half_pixel: gl.GetUniformLocation(
-                        debug_program,
-                        half_pixel.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    attrib_vert: gl.GetAttribLocation(
-                        debug_program,
-                        vert.as_ptr() as *const ffi::types::GLchar,
-                    ),
-                    attrib_vert_position: gl.GetAttribLocation(
-                        debug_program,
-                        vert_position.as_ptr() as *const ffi::types::GLchar,
-                    ),
+                    uniform_tex: {
+                        let loc = gl.GetUniformLocation(debug_program, tex.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'tex' not found in blur shader program (debug)");
+                        loc
+                    },
+                    uniform_matrix: {
+                        let loc = gl.GetUniformLocation(debug_program, matrix.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'matrix' not found in blur shader program (debug)");
+                        loc
+                    },
+                    uniform_tex_matrix: {
+                        let loc = gl.GetUniformLocation(debug_program, tex_matrix.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'tex_matrix' not found in blur shader program (debug)");
+                        loc
+                    },
+                    uniform_alpha: {
+                        let loc = gl.GetUniformLocation(debug_program, alpha.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'alpha' not found in blur shader program (debug)");
+                        loc
+                    },
+                    uniform_radius: {
+                        let loc = gl.GetUniformLocation(debug_program, radius.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'radius' not found in blur shader program (debug)");
+                        loc
+                    },
+                    uniform_half_pixel: {
+                        let loc = gl.GetUniformLocation(debug_program, half_pixel.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Uniform 'half_pixel' not found in blur shader program (debug)");
+                        loc
+                    },
+                    attrib_vert: {
+                        let loc = gl.GetAttribLocation(debug_program, vert.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Attribute 'vert' not found in blur shader program (debug)");
+                        loc
+                    },
+                    attrib_vert_position: {
+                        let loc = gl.GetAttribLocation(debug_program, vert_position.as_ptr() as *const ffi::types::GLchar);
+                        debug_assert_ne!(loc, -1, "Attribute 'vert_position' not found in blur shader program (debug)");
+                        loc
+                    },
                 },
             })
         };

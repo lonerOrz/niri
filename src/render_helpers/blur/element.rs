@@ -18,6 +18,18 @@ use crate::render_helpers::shaders::Shaders;
 use super::optimized_blur_texture_element::OptimizedBlurTextureElement;
 use super::{CurrentBuffer, EffectsFramebuffers};
 
+fn clamp_f32_uniform(value: f32, name: &str) -> f32 {
+    if value.is_nan() {
+        warn!("Uniform '{}' is NaN, clamping to 0.0", name);
+        0.0
+    } else if value.is_infinite() {
+        warn!("Uniform '{}' is infinite, clamping to 0.0", name);
+        0.0
+    } else {
+        value
+    }
+}
+
 #[derive(Debug)]
 pub enum BlurRenderElement {
     /// Use optimized blur, aka X-ray blur.
@@ -276,15 +288,15 @@ fn draw_true_blur(
                 Uniform::new(
                     "geo",
                     [
-                        dst.loc.x as f32,
-                        dst.loc.y as f32,
-                        dst.size.w as f32,
-                        dst.size.h as f32,
+                        clamp_f32_uniform(dst.loc.x as f32, "geo.x"),
+                        clamp_f32_uniform(dst.loc.y as f32, "geo.y"),
+                        clamp_f32_uniform(dst.size.w as f32, "geo.w"),
+                        clamp_f32_uniform(dst.size.h as f32, "geo.h"),
                     ],
                 ),
-                Uniform::new("alpha", alpha),
-                Uniform::new("noise", config.noise.0 as f32),
-                Uniform::new("corner_radius", corner_radius),
+                Uniform::new("alpha", clamp_f32_uniform(alpha, "alpha")),
+                Uniform::new("noise", clamp_f32_uniform(config.noise.0 as f32, "noise")),
+                Uniform::new("corner_radius", clamp_f32_uniform(corner_radius, "corner_radius")),
             ],
         )
     };
@@ -344,15 +356,15 @@ impl RenderElement<GlesRenderer> for BlurRenderElement {
                             Uniform::new(
                                 "geo",
                                 [
-                                    dst.loc.x as f32,
-                                    dst.loc.y as f32,
-                                    dst.size.w as f32,
-                                    dst.size.h as f32,
+                                    clamp_f32_uniform(dst.loc.x as f32, "geo.x"),
+                                    clamp_f32_uniform(dst.loc.y as f32, "geo.y"),
+                                    clamp_f32_uniform(dst.size.w as f32, "geo.w"),
+                                    clamp_f32_uniform(dst.size.h as f32, "geo.h"),
                                 ],
                             ),
-                            Uniform::new("corner_radius", *corner_radius),
-                            Uniform::new("noise", *noise),
-                            Uniform::new("alpha", self.alpha()),
+                            Uniform::new("corner_radius", clamp_f32_uniform(*corner_radius, "corner_radius")),
+                            Uniform::new("noise", clamp_f32_uniform(*noise, "noise")),
+                            Uniform::new("alpha", clamp_f32_uniform(self.alpha(), "alpha")),
                         ],
                     );
 

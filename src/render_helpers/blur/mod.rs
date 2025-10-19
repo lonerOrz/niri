@@ -412,7 +412,14 @@ pub(super) unsafe fn get_main_buffer_blur(
             (2f32.powi(blur_config.passes as i32 + 1) * blur_config.radius.0 as f32).ceil() as i32;
         dst.loc -= Point::from((size, size));
         dst.size += Size::from((size, size)).upscale(2);
-        dst
+        // Clamp the expanded destination to the texture size to prevent out-of-bounds blitting.
+        Rectangle::new(
+            Point::from((dst.loc.x.max(0), dst.loc.y.max(0))),
+            Size::from((
+                dst.size.w.min(tex_size.w - dst.loc.x.max(0)),
+                dst.size.h.min(tex_size.h - dst.loc.y.max(0)),
+            )),
+        )
     };
 
     let mut prev_fbo = 0;
@@ -510,8 +517,9 @@ pub(super) unsafe fn get_main_buffer_blur(
             );
         }
 
-        if gl.GetError() == ffi::INVALID_OPERATION {
-            error!("TrueBlur needs GLES3.0 for blitting");
+        let error = gl.GetError();
+        if error != ffi::NO_ERROR {
+            error!("gl.BlitFramebuffer failed with error: {:#x}", error);
             return Err(GlesError::BlitError);
         }
     }
@@ -872,9 +880,9 @@ unsafe fn render_blur_pass_with_gl(
             std::ptr::null(),
         );
 
-        // vert_position
+        // vert_position (using vbos[1] for vertex position data)
         gl.EnableVertexAttribArray(program.attrib_vert_position as u32);
-        gl.BindBuffer(ffi::ARRAY_BUFFER, 0);
+        gl.BindBuffer(ffi::ARRAY_BUFFER, vbos[1]); // Assuming vbos[1] is for vert_position
 
         gl.VertexAttribPointer(
             program.attrib_vert_position as u32,
@@ -882,7 +890,7 @@ unsafe fn render_blur_pass_with_gl(
             ffi::FLOAT,
             ffi::FALSE,
             0,
-            vertices.as_ptr() as *const _,
+            std::ptr::null(), // Offset into the bound buffer
         );
 
         if supports_instancing {
