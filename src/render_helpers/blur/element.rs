@@ -262,6 +262,7 @@ fn draw_true_blur(
 
     // Update the blur buffers.
     // We use gl ffi directly to circumvent some stuff done by smithay
+    let is_shared = gles_frame.egl_context().is_shared();
     let blurred_texture = gles_frame.with_context(|gl| unsafe {
         super::get_main_buffer_blur(
             gl,
@@ -275,6 +276,7 @@ fn draw_true_blur(
             supports_instancing,
             dst,
             is_tty,
+            is_shared,
         )
     })??;
 

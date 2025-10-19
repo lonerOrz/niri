@@ -108,11 +108,7 @@ impl BlurShader {
                         debug_assert_ne!(loc, -1, "Uniform 'tex_matrix' not found in blur shader program (normal)");
                         loc
                     },
-                    uniform_alpha: {
-                        let loc = gl.GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar);
-                        debug_assert_ne!(loc, -1, "Uniform 'alpha' not found in blur shader program (normal)");
-                        loc
-                    },
+                    uniform_alpha: gl.GetUniformLocation(program, alpha.as_ptr() as *const ffi::types::GLchar),
                     uniform_radius: {
                         let loc = gl.GetUniformLocation(program, radius.as_ptr() as *const ffi::types::GLchar);
                         debug_assert_ne!(loc, -1, "Uniform 'radius' not found in blur shader program (normal)");
@@ -151,11 +147,7 @@ impl BlurShader {
                         debug_assert_ne!(loc, -1, "Uniform 'tex_matrix' not found in blur shader program (debug)");
                         loc
                     },
-                    uniform_alpha: {
-                        let loc = gl.GetUniformLocation(debug_program, alpha.as_ptr() as *const ffi::types::GLchar);
-                        debug_assert_ne!(loc, -1, "Uniform 'alpha' not found in blur shader program (debug)");
-                        loc
-                    },
+                    uniform_alpha: gl.GetUniformLocation(debug_program, alpha.as_ptr() as *const ffi::types::GLchar),
                     uniform_radius: {
                         let loc = gl.GetUniformLocation(debug_program, radius.as_ptr() as *const ffi::types::GLchar);
                         debug_assert_ne!(loc, -1, "Uniform 'radius' not found in blur shader program (debug)");
