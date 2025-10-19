@@ -4,12 +4,66 @@ pub mod element;
 pub mod optimized_blur_texture_element;
 pub(super) mod shader;
 
-use anyhow::Context;
 use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
+use std::sync::MutexGuard;
+use std::time::{Duration, Instant};
 
+/// 简单的 FBO RAII：在 drop 时删除 fbo
+struct ScopedFbo {
+    id: u32,
+    gl: *const ffi::Gles2,
+}
+impl ScopedFbo {
+    fn new(gl: &ffi::Gles2) -> Result<Self, GlesError> {
+        let mut id = 0;
+        unsafe { gl.GenFramebuffers(1, &mut id as *mut _) };
+        if id == 0 {
+            return Err(GlesError::FramebufferBindingError);
+        }
+        Ok(Self { id, gl: gl as *const _ })
+    }
+}
+impl std::fmt::Debug for ScopedFbo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ScopedFbo {{ id: {} }}", self.id)
+    }
+}
+impl Drop for ScopedFbo {
+    fn drop(&mut self) {
+        unsafe {
+            // Safety: caller ensures gl pointer is valid while ScopedFbo alive
+            if self.gl.is_null() { return; } // Added null check
+            (*self.gl).DeleteFramebuffers(1, &mut (self.id) as *mut _);
+        }
+    }
+}
+
+/// 在创建时记住 prev binding，drop 时恢复
+struct FboBindingGuard {
+    pub prev: i32,
+    gl: *const ffi::Gles2,
+}
+impl FboBindingGuard {
+    fn new(gl: &ffi::Gles2) -> Self {
+        let mut prev = 0;
+        unsafe { gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev as *mut _) };
+        Self { prev, gl }
+    }
+}
+impl Drop for FboBindingGuard {
+    fn drop(&mut self) {
+        unsafe {
+            (*self.gl).BindFramebuffer(ffi::FRAMEBUFFER, self.prev as u32);
+        }
+    }
+}
+
+
+use anyhow::Context;
 use glam::{Mat3, Vec2};
 use niri_config::Blur;
+use shader::BlurShaders;
 use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::AsRenderElements;
 use smithay::backend::renderer::gles::format::fourcc_to_gl_formats;
@@ -22,15 +76,10 @@ use smithay::reexports::gbm::Format;
 use smithay::utils::{Buffer, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::shell::wlr_layer::Layer;
 
-use crate::render_helpers::renderer::NiriRenderer;
-use shader::BlurShaders;
-
 use super::render_data::RendererData;
 use super::render_elements;
 use super::shaders::Shaders;
-
-use std::sync::MutexGuard;
-use std::time::{Duration, Instant};
+use crate::render_helpers::renderer::NiriRenderer;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum CurrentBuffer {
@@ -94,8 +143,11 @@ impl EffectsFramebuffers {
     pub fn set_dirty(output: &Output) {
         const THROTTLE_INTERVAL_MS: u64 = 33;
 
-        let Some(mut fx_buffers) = output.user_data().get::<EffectsFramebufffersUserData>()
-            .map(|user_data| RefCell::borrow_mut(user_data)) else {
+        let Some(mut fx_buffers) = output
+            .user_data()
+            .get::<EffectsFramebufffersUserData>()
+            .map(|user_data| RefCell::borrow_mut(user_data))
+        else {
             return;
         };
         let now = Instant::now();
@@ -432,8 +484,7 @@ pub(super) unsafe fn get_main_buffer_blur(
         )
     };
 
-    let mut prev_fbo = 0;
-    gl.GetIntegerv(ffi::FRAMEBUFFER_BINDING, &mut prev_fbo as *mut _);
+    let binding_guard = FboBindingGuard::new(gl);
 
     let (sample_buffer, _) = fx_buffers.buffers();
 
@@ -445,7 +496,9 @@ pub(super) unsafe fn get_main_buffer_blur(
 
     let mut major_version = 2;
     let mut minor_version = 0;
-    if let Some(version_part) = gles_version.get(gles_version.find("OpenGL ES ").unwrap_or(0) + "OpenGL ES ".len()..) {
+    if let Some(version_part) =
+        gles_version.get(gles_version.find("OpenGL ES ").unwrap_or(0) + "OpenGL ES ".len()..)
+    {
         let mut parts = version_part.split('.');
         major_version = parts.next().and_then(|s| s.parse().ok()).unwrap_or(2);
         minor_version = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -459,13 +512,16 @@ pub(super) unsafe fn get_main_buffer_blur(
         return Err(GlesError::BlitError);
     }
 
+    let _render_buffer_fbo_guard = ScopedFbo::new(gl)?;
+    let render_buffer_fbo = _render_buffer_fbo_guard.id;
+
     let supports_memory_barrier = major_version > 3 || (major_version == 3 && minor_version >= 1);
 
     // First get a fbo for the texture we are about to read into
-    let mut sample_fbo = 0u32;
+    let _sample_fbo_guard = ScopedFbo::new(gl)?;
+    let sample_fbo = _sample_fbo_guard.id;
     {
-        gl.GenFramebuffers(1, &mut sample_fbo as *mut _);
-        gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
+        gl.BindFramebuffer(ffi::FRAMEBUFFER, sample_fbo);
         gl.FramebufferTexture2D(
             ffi::FRAMEBUFFER,
             ffi::COLOR_ATTACHMENT0,
@@ -476,7 +532,8 @@ pub(super) unsafe fn get_main_buffer_blur(
         gl.Clear(ffi::COLOR_BUFFER_BIT);
         let status = gl.CheckFramebufferStatus(ffi::FRAMEBUFFER);
         if status != ffi::FRAMEBUFFER_COMPLETE {
-            gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
+            // gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _); // Handled by ScopedFbo
+            // gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32); // Handled by FboBindingGuard
             return Err(GlesError::FramebufferBindingError);
         }
     }
@@ -484,6 +541,7 @@ pub(super) unsafe fn get_main_buffer_blur(
     {
         // NOTE: We are assured that the size of the effects texture is the same
         // as the bound fbo size, so blitting uses dst immediatly
+        gl.BindFramebuffer(ffi::READ_FRAMEBUFFER, binding_guard.prev as u32);
         gl.BindFramebuffer(ffi::DRAW_FRAMEBUFFER, sample_fbo);
 
         if is_tty {
@@ -533,83 +591,87 @@ pub(super) unsafe fn get_main_buffer_blur(
         let error = gl.GetError();
         if error != ffi::NO_ERROR {
             error!("gl.BlitFramebuffer failed with error: {:#x}", error);
+            // gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32); // Handled by FboBindingGuard
             return Err(GlesError::BlitError);
         }
-    }
+        // gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32); // Handled by FboBindingGuard
 
-    // Add a barrier here to prevent a read-after-write hazard.
-    // The subsequent blur passes will read from the texture we just blitted to.
-    if is_shared {
-        gl.Finish();
-    } else if supports_memory_barrier {
-        gl.MemoryBarrier(ffi::TEXTURE_FETCH_BARRIER_BIT);
-    } else {
-        // Fallback for GLES < 3.1
-        gl.Finish();
-    }
-
-    {
-        let passes = blur_config.passes;
-        let half_pixel = [
-            0.5 / (tex_size.w as f32 / 2.0),
-            0.5 / (tex_size.h as f32 / 2.0),
-        ];
-        for i in 0..passes {
-            let (sample_buffer, render_buffer) = fx_buffers.buffers();
-            let damage = dst_expanded.downscale(1 << (i + 1));
-            render_blur_pass_with_gl(
-                gl,
-                vbos,
-                debug,
-                supports_instancing,
-                projection_matrix,
-                sample_buffer,
-                render_buffer,
-                scale,
-                &shaders.down,
-                half_pixel,
-                blur_config.clone(),
-                damage,
-                is_shared,
-                supports_memory_barrier,
-            )?;
-            fx_buffers.current_buffer.swap();
+        // Add a barrier here to prevent a read-after-write hazard.
+        // The subsequent blur passes will read from the texture we just blitted to.
+        if is_shared {
+            gl.Finish();
+        } else if supports_memory_barrier {
+            gl.MemoryBarrier(ffi::TEXTURE_FETCH_BARRIER_BIT);
+        } else {
+            // Fallback for GLES < 3.1
+            gl.Finish();
         }
 
-        let half_pixel = [
-            0.5 / (tex_size.w as f32 * 2.0),
-            0.5 / (tex_size.h as f32 * 2.0),
-        ];
-        for i in 0..passes {
-            let (sample_buffer, render_buffer) = fx_buffers.buffers();
-            let damage = dst_expanded.downscale(1 << (passes - 1 - i));
-            render_blur_pass_with_gl(
-                gl,
-                &vbos,
-                debug,
-                supports_instancing,
-                projection_matrix,
-                sample_buffer,
-                render_buffer,
-                scale,
-                &shaders.up,
-                half_pixel,
-                blur_config.clone(),
-                damage,
-                is_shared,
-                supports_memory_barrier,
-            )?;
-            fx_buffers.current_buffer.swap();
+        {
+            let passes = blur_config.passes;
+            let half_pixel = [
+                0.5 / (tex_size.w as f32 / 2.0),
+                0.5 / (tex_size.h as f32 / 2.0),
+            ];
+            for i in 0..passes {
+                let (sample_buffer, render_buffer) = fx_buffers.buffers();
+                let damage = dst_expanded.downscale(1 << (i + 1));
+                render_blur_pass_with_gl(
+                    gl,
+                    vbos,
+                    debug,
+                    supports_instancing,
+                    projection_matrix,
+                    sample_buffer,
+                    render_buffer,
+                    scale,
+                    &shaders.down,
+                    half_pixel,
+                    blur_config.clone(),
+                    damage,
+                    is_shared,
+                    supports_memory_barrier,
+                    render_buffer_fbo,
+                )?;
+                fx_buffers.current_buffer.swap();
+            }
+
+            let half_pixel = [
+                0.5 / (tex_size.w as f32 * 2.0),
+                0.5 / (tex_size.h as f32 * 2.0),
+            ];
+            for i in 0..passes {
+                let (sample_buffer, render_buffer) = fx_buffers.buffers();
+                let damage = dst_expanded.downscale(1 << (passes - 1 - i));
+                render_blur_pass_with_gl(
+                    gl,
+                    &vbos,
+                    debug,
+                    supports_instancing,
+                    projection_matrix,
+                    sample_buffer,
+                    render_buffer,
+                    scale,
+                    &shaders.up,
+                    half_pixel,
+                    blur_config.clone(),
+                    damage,
+                    is_shared,
+                    supports_memory_barrier,
+                    render_buffer_fbo,
+                )?;
+                fx_buffers.current_buffer.swap();
+            }
         }
-    }
 
-    // Cleanup
-    {
-        gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _);
-        gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32);
+            // Cleanup (Handled by RAII guards)
+            {
+                // gl.DeleteFramebuffers(1, &mut sample_fbo as *mut _); // Handled by ScopedFbo
+                // gl.DeleteFramebuffers(1, &mut render_buffer_fbo as *mut _); // Handled by ScopedFbo
+                // gl.BindFramebuffer(ffi::FRAMEBUFFER, prev_fbo as u32); // Handled by FboBindingGuard
+            }
+        Ok(fx_buffers.effects.clone())
     }
-
-    Ok(fx_buffers.effects.clone())
 }
 
 // Renders a blur pass using a GlesFrame with syncing and fencing provided by smithay. Used for
@@ -793,7 +855,9 @@ unsafe fn render_blur_pass_with_gl(
     _damage: Rectangle<i32, Physical>,
     is_shared: bool,
     supports_memory_barrier: bool,
+    render_buffer_fbo: u32, // New parameter
 ) -> Result<(), GlesError> {
+    let _binding_guard = FboBindingGuard::new(gl);
     let tex_size = sample_buffer.size();
     let src = Rectangle::from_size(tex_size.to_f64());
     let dest = src
@@ -808,9 +872,7 @@ unsafe fn render_blur_pass_with_gl(
     // stuff. Complicated.
 
     // First bind to our render buffer
-    let mut render_buffer_fbo = 0;
     {
-        gl.GenFramebuffers(1, &mut render_buffer_fbo as *mut _);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, render_buffer_fbo);
         gl.FramebufferTexture2D(
             ffi::FRAMEBUFFER,
@@ -934,6 +996,9 @@ unsafe fn render_blur_pass_with_gl(
         gl.BindTexture(ffi::TEXTURE_2D, 0);
         gl.DisableVertexAttribArray(program.attrib_vert as u32);
         gl.DisableVertexAttribArray(program.attrib_vert_position as u32);
+
+        gl.Enable(ffi::BLEND);
+        gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
     }
 
     // After each pass, we need to add a barrier to ensure that the texture we just rendered to
@@ -955,7 +1020,6 @@ unsafe fn render_blur_pass_with_gl(
     // Clean up
     {
         gl.Enable(ffi::BLEND);
-        gl.DeleteFramebuffers(1, &render_buffer_fbo as *const _);
         gl.BindFramebuffer(ffi::FRAMEBUFFER, 0);
         gl.BlendFunc(ffi::ONE, ffi::ONE_MINUS_SRC_ALPHA);
     }
