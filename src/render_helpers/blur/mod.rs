@@ -537,6 +537,17 @@ pub(super) unsafe fn get_main_buffer_blur(
         }
     }
 
+    // Add a barrier here to prevent a read-after-write hazard.
+    // The subsequent blur passes will read from the texture we just blitted to.
+    if is_shared {
+        gl.Finish();
+    } else if supports_memory_barrier {
+        gl.MemoryBarrier(ffi::TEXTURE_FETCH_BARRIER_BIT);
+    } else {
+        // Fallback for GLES < 3.1
+        gl.Finish();
+    }
+
     {
         let passes = blur_config.passes;
         let half_pixel = [
