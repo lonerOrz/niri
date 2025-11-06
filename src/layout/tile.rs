@@ -1025,7 +1025,7 @@ impl<W: LayoutElement> Tile<W> {
             alpha * (1. - p) + 1. * p
         };
 
-        let blur_config = self.window.rules().blur.resolve_against(self.options.blur);
+        let blur_config = self.window.rules().blur.resolve_against(self.options.layout.blur);
 
         // This is here rather than in render_offset() because render_offset() is currently assumed
         // by the code to be temporary. So, for example, interactive move will try to "grab" the

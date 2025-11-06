@@ -10,7 +10,6 @@ use crate::{BorderRule, BlurRule, Color, FloatOrInt, InsertHintPart, ShadowRule,
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layout {
     pub focus_ring: FocusRing,
-    #[knuffel(child, default)]
     pub blur: Blur,
     pub border: Border,
     pub shadow: Shadow,

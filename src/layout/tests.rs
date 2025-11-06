@@ -243,6 +243,10 @@ impl LayoutElement for TestWindow {
         false
     }
 
+    fn is_fullscreen(&self) -> bool {
+        self.sizing_mode().is_fullscreen()
+    }
+
     fn pending_sizing_mode(&self) -> SizingMode {
         self.0.pending_sizing_mode.get()
     }
