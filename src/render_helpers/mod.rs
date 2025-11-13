@@ -48,6 +48,8 @@ pub enum RenderTarget {
     Screencast,
     /// Rendering for any other screen capture.
     ScreenCapture,
+    /// Rendering for the overview.
+    Overview,
 }
 
 /// Buffer with location, src and dst.
@@ -83,7 +85,9 @@ impl RenderTarget {
         match block_out_from {
             None => false,
             Some(BlockOutFrom::Screencast) => self == RenderTarget::Screencast,
-            Some(BlockOutFrom::ScreenCapture) => self != RenderTarget::Output,
+            Some(BlockOutFrom::ScreenCapture) => {
+                !matches!(self, RenderTarget::Output | RenderTarget::Overview)
+            }
         }
     }
 }

@@ -4252,7 +4252,9 @@ impl Niri {
         let _span = tracy_client::span!("Niri::render");
 
         if target == RenderTarget::Output {
-            if let Some(preview) = self.config.borrow().debug.preview_render {
+            if self.layout.is_overview_open() {
+                target = RenderTarget::Overview;
+            } else if let Some(preview) = self.config.borrow().debug.preview_render {
                 target = match preview {
                     PreviewRender::Screencast => RenderTarget::Screencast,
                     PreviewRender::ScreenCapture => RenderTarget::ScreenCapture,

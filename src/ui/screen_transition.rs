@@ -63,6 +63,7 @@ impl ScreenTransition {
             RenderTarget::Output => 0,
             RenderTarget::Screencast => 1,
             RenderTarget::ScreenCapture => 2,
+            RenderTarget::Overview => 0,
         };
 
         PrimaryGpuTextureRenderElement(TextureRenderElement::from_texture_buffer(
