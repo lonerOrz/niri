@@ -708,7 +708,6 @@ fn render_blur_pass_with_frame(
         // We are doing basically what Frame::render_texture_from_to does, but our own shader struct
         // instead. This allows me to get into the gl plumbing.
 
-        // NOTE: We are rendering at the origin of the texture, no need to translate
         let mut mat = Mat3::IDENTITY;
         let src_size = sample_buffer.size().to_f64();
 
@@ -721,12 +720,8 @@ fn render_blur_pass_with_frame(
             tex_mat *= Mat3::from_cols_array(&[1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0]);
         }
 
-        // NOTE: We know that this texture is always opaque so skip on some logic checks and
-        // directly render. The following code is from GlesRenderer::render_texture
-        gl.Disable(ffi::BLEND);
-
         // Since we are just rendering onto the offsreen buffer, the vertices to draw are only 4
-        let damage = [
+        let damage_rect = [
             dst.loc.x as f32,
             dst.loc.y as f32,
             dst.size.w as f32,
@@ -735,12 +730,12 @@ fn render_blur_pass_with_frame(
 
         let mut vertices = Vec::with_capacity(4);
         let damage_len = if supports_instaning {
-            vertices.extend(damage);
+            vertices.extend(damage_rect);
             vertices.len() / 4
         } else {
             for _ in 0..6 {
                 // Add the 4 f32s per damage rectangle for each of the 6 vertices.
-                vertices.extend_from_slice(&damage);
+                vertices.extend_from_slice(&damage_rect);
             }
 
             1
@@ -760,10 +755,16 @@ fn render_blur_pass_with_frame(
             &variant.normal
         };
 
+        // NOTE: We know that this texture is always opaque so skip on some logic checks and
+        // directly render. The following code is from GlesRenderer::render_texture
+        gl.Disable(ffi::BLEND);
+
         gl.ActiveTexture(ffi::TEXTURE0);
         gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
         gl.UseProgram(program.program);
 
         gl.Uniform1i(program.uniform_tex, 0);
@@ -893,11 +894,9 @@ unsafe fn render_blur_pass_with_gl(
         // NOTE: We are assured that tex_size != 0, and src.size != too (by damage tracker)
         let tex_mat = build_texture_mat(src, dest, tex_size, Transform::Normal);
 
-        gl.Disable(ffi::BLEND);
-
         // FIXME: Use actual damage for this? Would require making a custom window render element
         // that includes blur and whatnot to get the damage for the window only
-        let damage = [
+        let damage_rect = [
             damage.loc.x as f32,
             damage.loc.y as f32,
             damage.size.w as f32,
@@ -906,12 +905,12 @@ unsafe fn render_blur_pass_with_gl(
 
         let mut vertices = Vec::with_capacity(4);
         let damage_len = if supports_instancing {
-            vertices.extend(damage);
+            vertices.extend(damage_rect);
             vertices.len() / 4
         } else {
             for _ in 0..6 {
                 // Add the 4 f32s per damage rectangle for each of the 6 vertices.
-                vertices.extend_from_slice(&damage);
+                vertices.extend_from_slice(&damage_rect);
             }
 
             1
@@ -929,10 +928,14 @@ unsafe fn render_blur_pass_with_gl(
             &variant.normal
         };
 
+        gl.Disable(ffi::BLEND);
+
         gl.ActiveTexture(ffi::TEXTURE0);
         gl.BindTexture(ffi::TEXTURE_2D, sample_buffer.tex_id());
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MIN_FILTER, ffi::LINEAR as i32);
         gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_MAG_FILTER, ffi::LINEAR as i32);
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
+        gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
         gl.UseProgram(program.program);
 
         gl.Uniform1i(program.uniform_tex, 0);
