@@ -175,8 +175,8 @@ use crate::utils::watcher::Watcher;
 use crate::utils::xwayland::satellite::Satellite;
 use crate::utils::{
     center, center_f64, expand_home, get_monotonic_time, ipc_transform_to_smithay, is_mapped,
-    logical_output, make_screenshot_path, output_matches_name, output_size, send_scale_transform,
-    write_png_rgba8, xwayland,
+    logical_output, make_screenshot_path, output_matches_name, output_size, panel_orientation,
+    send_scale_transform, write_png_rgba8, xwayland,
 };
 use crate::window::mapped::MappedId;
 use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
@@ -1477,6 +1477,9 @@ impl State {
             libinput_config_changed = true;
         }
 
+        let ignored_nodes_changed =
+            config.debug.ignored_drm_devices != old_config.debug.ignored_drm_devices;
+
         if config.outputs != self.niri.config_file_output_config {
             output_config_changed = true;
             self.niri
@@ -1612,6 +1615,10 @@ impl State {
             }
         }
 
+        if ignored_nodes_changed {
+            self.backend.update_ignored_nodes_config(&mut self.niri);
+        }
+
         if output_config_changed {
             self.reload_output_config();
         }
@@ -1699,9 +1706,10 @@ impl State {
                 });
             let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
-            let mut transform = config
-                .map(|c| ipc_transform_to_smithay(c.transform))
-                .unwrap_or(Transform::Normal);
+            let mut transform = panel_orientation(output)
+                + config
+                    .map(|c| ipc_transform_to_smithay(c.transform))
+                    .unwrap_or(Transform::Normal);
             // FIXME: fix winit damage on other transforms.
             if name.connector == "winit" {
                 transform = Transform::Flipped180;
@@ -3026,9 +3034,9 @@ impl Niri {
         });
         let scale = closest_representable_scale(scale.clamp(0.1, 10.));
 
-        let mut transform = c
-            .map(|c| ipc_transform_to_smithay(c.transform))
-            .unwrap_or(Transform::Normal);
+        let mut transform = panel_orientation(&output)
+            + c.map(|c| ipc_transform_to_smithay(c.transform))
+                .unwrap_or(Transform::Normal);
 
         let mut backdrop_color = c
             .and_then(|c| c.backdrop_color)
