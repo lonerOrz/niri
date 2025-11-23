@@ -325,8 +325,8 @@ fn height_resize_and_back_during_another_y_anim() {
 
     // No time had passed, so no change in coordinates yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x:100 y:  0
+    100 × 100 at x:-200 y:  0
+    200 × 200 at x:-100 y:  0
     ");
 
     // Advance the time halfway.
@@ -334,8 +334,8 @@ fn height_resize_and_back_during_another_y_anim() {
 
     // Second window halfway to the bottom.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 50 y: 50
+    100 × 100 at x:-100 y:  0
+    200 × 200 at x:-50 y: 50
     ");
 
     let ops = [
@@ -357,8 +357,8 @@ fn height_resize_and_back_during_another_y_anim() {
 
     // No time had passed, so no change in state yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 50 y: 50
+    100 × 100 at x:-100 y:  0
+    200 × 200 at x:-50 y: 50
     ");
 
     // Advance the time a bit.
@@ -367,8 +367,8 @@ fn height_resize_and_back_during_another_y_anim() {
     // X changed by 20, but y changed by 30 since the Y movement from the resize compounds with the
     // Y movement from consume-into-column.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 120 at x:  0 y:  0
-    200 × 200 at x: 30 y: 80
+    100 × 120 at x:-60 y:  0
+    200 × 200 at x:-30 y: 80
     ");
 
     let ops = [
@@ -390,16 +390,16 @@ fn height_resize_and_back_during_another_y_anim() {
 
     // No time had passed, so no change in state yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 120 at x:  0 y:  0
-    200 × 200 at x: 30 y: 80
+    100 × 120 at x:-60 y:  0
+    200 × 200 at x:-30 y: 80
     ");
 
     // Advance the time a bit. Both resize and consume movement are still ongoing.
     Op::AdvanceAnimations { msec_delta: 200 }.apply(&mut layout);
 
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 116 at x:  0 y:  0
-    200 × 200 at x: 10 y: 84
+    100 × 116 at x:-20 y:  0
+    200 × 200 at x:-10 y: 84
     ");
 
     // Advance the time to complete the consume movement.
@@ -458,8 +458,8 @@ fn height_resize_and_cancel_during_another_y_anim() {
 
     // No time had passed, so no change in coordinates yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x:100 y:  0
+    100 × 100 at x:-200 y:  0
+    200 × 200 at x:-100 y:  0
     ");
 
     // Advance the time halfway.
@@ -467,8 +467,8 @@ fn height_resize_and_cancel_during_another_y_anim() {
 
     // Second window halfway to the bottom.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 50 y: 50
+    100 × 100 at x:-100 y:  0
+    200 × 200 at x:-50 y: 50
     ");
 
     let ops = [
@@ -493,8 +493,8 @@ fn height_resize_and_cancel_during_another_y_anim() {
     // X changed by 5, but y changed by 8 since the Y movement from the resize compounds with the Y
     // movement from consume-into-column.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 105 at x:  0 y:  0
-    200 × 200 at x: 45 y: 58
+    100 × 105 at x:-90 y:  0
+    200 × 200 at x:-45 y: 58
     ");
 
     let ops = [
@@ -518,8 +518,8 @@ fn height_resize_and_cancel_during_another_y_anim() {
     // Since the resize anim was cancelled, second window's Y anim is adjusted to preserve the
     // current position while targeting the new final position.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 45 y: 58
+    100 × 100 at x:-90 y:  0
+    200 × 200 at x:-45 y: 58
     ");
 
     // Advance the time to complete the consume movement.
@@ -593,8 +593,8 @@ fn height_resize_before_another_y_anim_then_back() {
 
     // No time had passed, so no change in coordinates yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 120 at x:  0 y:  0
-    200 × 200 at x:100 y:  0
+    100 × 120 at x:-200 y:  0
+    200 × 200 at x:-100 y:  0
     ");
 
     // Advance the time halfway.
@@ -604,8 +604,8 @@ fn height_resize_before_another_y_anim_then_back() {
     // window's resize, the second window's Y is unaffected by it and is animating towards the
     // final position right away.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 180 at x:  0 y:  0
-    200 × 200 at x: 40 y:120
+    100 × 180 at x:-80 y:  0
+    200 × 200 at x:-40 y:120
     ");
 
     let ops = [
@@ -627,16 +627,16 @@ fn height_resize_before_another_y_anim_then_back() {
 
     // No time had passed, so no change in state yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 180 at x:  0 y:  0
-    200 × 200 at x: 40 y:120
+    100 × 180 at x:-80 y:  0
+    200 × 200 at x:-40 y:120
     ");
 
     // Advance the time a bit. Both resize and consume movement are still ongoing.
     Op::AdvanceAnimations { msec_delta: 200 }.apply(&mut layout);
 
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 164 at x:  0 y:  0
-    200 × 200 at x: 20 y:116
+    100 × 164 at x:-40 y:  0
+    200 × 200 at x:-20 y:116
     ");
 
     // Advance the time to complete the consume movement.
@@ -708,8 +708,8 @@ fn height_resize_before_another_y_anim_then_cancel() {
 
     // No time had passed, so no change in coordinates yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 102 at x:  0 y:  0
-    200 × 200 at x:100 y:  0
+    100 × 102 at x:-200 y:  0
+    200 × 200 at x:-100 y:  0
     ");
 
     // Advance the time a little.
@@ -717,8 +717,8 @@ fn height_resize_before_another_y_anim_then_cancel() {
 
     // Second window on its way to the bottom.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 104 at x:  0 y:  0
-    200 × 200 at x: 98 y:  4
+    100 × 104 at x:-196 y:  0
+    200 × 200 at x:-98 y:  4
     ");
 
     let ops = [
@@ -741,8 +741,8 @@ fn height_resize_before_another_y_anim_then_cancel() {
 
     // The second window's trajectory readjusts to the new final position at 100 px, without jumps.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 98 y:  4
+    100 × 100 at x:-196 y:  0
+    200 × 200 at x:-98 y:  4
     ");
 
     // Advance the time to complete the consume movement.
@@ -788,8 +788,8 @@ fn clientside_height_change_during_another_y_anim() {
 
     // Second window on its way to the bottom.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 100 at x:  0 y:  0
-    200 × 200 at x: 80 y: 20
+    100 × 100 at x:-160 y:  0
+    200 × 200 at x:-80 y: 20
     ");
 
     let ops = [
@@ -805,8 +805,8 @@ fn clientside_height_change_during_another_y_anim() {
 
     // The second window's trajectory readjusts to the new final position at 200 px, without jumps.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 200 at x:  0 y:  0
-    200 × 200 at x: 80 y: 20
+    100 × 200 at x:-160 y:  0
+    200 × 200 at x:-80 y: 20
     ");
 
     // Advance the time to complete the consume movement.
@@ -873,8 +873,8 @@ fn height_resize_cancel_with_stationary_second_window() {
 
     // No time had passed, so no change in coordinates yet.
     assert_snapshot!(format_tiles(&layout), @r"
-    100 × 102 at x:  0 y:  0
-    200 × 200 at x:100 y:  0
+    100 × 102 at x:-200 y:  0
+    200 × 200 at x:-100 y:  0
     ");
 
     // Advance the time a little.
