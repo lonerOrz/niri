@@ -40,12 +40,13 @@ struct TestWindowInner {
     is_pending_windowed_fullscreen: Cell<bool>,
     animate_next_configure: Cell<bool>,
     animation_snapshot: RefCell<Option<LayoutElementRenderSnapshot>>,
+    rules: ResolvedWindowRules,
 }
 
 #[derive(Debug, Clone)]
 struct TestWindow(Rc<TestWindowInner>);
 
-#[derive(Debug, Clone, Copy, Arbitrary)]
+#[derive(Debug, Clone, Arbitrary)]
 struct TestWindowParams {
     #[proptest(strategy = "1..=5usize")]
     id: usize,
@@ -56,6 +57,8 @@ struct TestWindowParams {
     bbox: Rectangle<i32, Logical>,
     #[proptest(strategy = "arbitrary_min_max_size()")]
     min_max_size: (Size<i32, Logical>, Size<i32, Logical>),
+    #[proptest(strategy = "prop::option::of(arbitrary_rules())")]
+    rules: Option<ResolvedWindowRules>,
 }
 
 impl TestWindowParams {
@@ -66,6 +69,7 @@ impl TestWindowParams {
             is_floating: false,
             bbox: Rectangle::from_size(Size::from((100, 200))),
             min_max_size: Default::default(),
+            rules: None,
         }
     }
 }
@@ -88,6 +92,7 @@ impl TestWindow {
             is_pending_windowed_fullscreen: Cell::new(false),
             animate_next_configure: Cell::new(false),
             animation_snapshot: RefCell::new(None),
+            rules: params.rules.unwrap_or_default(),
         }))
     }
 
@@ -270,8 +275,7 @@ impl LayoutElement for TestWindow {
     fn refresh(&self) {}
 
     fn rules(&self) -> &ResolvedWindowRules {
-        static EMPTY: ResolvedWindowRules = ResolvedWindowRules::empty();
-        &EMPTY
+        &self.0.rules
     }
 
     fn take_animation_snapshot(&mut self) -> Option<LayoutElementRenderSnapshot> {
@@ -351,6 +355,19 @@ fn arbitrary_min_max_size() -> impl Strategy<Value = (Size<i32, Logical>, Size<i
             (size, size)
         }),
     ]
+}
+
+prop_compose! {
+    fn arbitrary_rules()(
+        focus_ring in arbitrary_focus_ring(),
+        border in arbitrary_border(),
+    ) -> ResolvedWindowRules {
+        ResolvedWindowRules {
+            focus_ring,
+            border,
+            ..ResolvedWindowRules::default()
+        }
+    }
 }
 
 fn arbitrary_view_offset_gesture_delta() -> impl Strategy<Value = f64> {
@@ -899,6 +916,7 @@ impl Op {
                     }
                 }
 
+                let is_floating = params.is_floating;
                 let win = TestWindow::new(params);
                 layout.add_window(
                     win,
@@ -906,7 +924,7 @@ impl Op {
                     None,
                     None,
                     false,
-                    params.is_floating,
+                    is_floating,
                     ActivateWindow::default(),
                 );
             }
@@ -967,6 +985,7 @@ impl Op {
                     }
                 }
 
+                let is_floating = params.is_floating;
                 let win = TestWindow::new(params);
                 layout.add_window(
                     win,
@@ -974,7 +993,7 @@ impl Op {
                     None,
                     None,
                     false,
-                    params.is_floating,
+                    is_floating,
                     ActivateWindow::default(),
                 );
             }
@@ -1040,6 +1059,7 @@ impl Op {
                     }
                 }
 
+                let is_floating = params.is_floating;
                 let win = TestWindow::new(params);
                 layout.add_window(
                     win,
@@ -1047,7 +1067,7 @@ impl Op {
                     None,
                     None,
                     false,
-                    params.is_floating,
+                    is_floating,
                     ActivateWindow::default(),
                 );
             }
@@ -3621,6 +3641,45 @@ fn move_window_to_workspace_maximize_and_fullscreen() {
     // the column. MoveWindowToWorkspace removes the window from the column and this information is
     // forgotten.
     assert_eq!(win.pending_sizing_mode(), SizingMode::Normal);
+}
+
+#[test]
+fn tabs_with_different_border() {
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams {
+                rules: Some(ResolvedWindowRules {
+                    border: niri_config::BorderRule {
+                        on: true,
+                        ..Default::default()
+                    },
+                    ..ResolvedWindowRules::default()
+                }),
+                ..TestWindowParams::new(2)
+            },
+        },
+        Op::SwitchPresetWindowHeight { id: None },
+        Op::ToggleColumnTabbedDisplay,
+        Op::AddWindow {
+            params: TestWindowParams::new(3),
+        },
+        Op::ConsumeOrExpelWindowLeft { id: None },
+    ];
+
+    let options = Options {
+        layout: niri_config::Layout {
+            struts: Struts {
+                left: FloatOrInt(0.),
+                right: FloatOrInt(0.),
+                top: FloatOrInt(20000.),
+                bottom: FloatOrInt(0.),
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    check_ops_with_options(options, ops);
 }
 
 fn parent_id_causes_loop(layout: &Layout<TestWindow>, id: usize, mut parent_id: usize) -> bool {
