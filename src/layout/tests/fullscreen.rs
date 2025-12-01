@@ -489,7 +489,7 @@ fn unfullscreen_of_tabbed_preserves_view_pos() {
     check_ops_on_layout(&mut layout, ops);
 
     // View pos is back to showing the first window.
-    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-132");
+    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-16");
 }
 
 #[test]
@@ -542,7 +542,7 @@ fn unfullscreen_of_tabbed_via_change_to_normal_preserves_view_pos() {
     check_ops_on_layout(&mut layout, ops);
 
     // View pos is back to showing the first window.
-    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-132");
+    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-16");
 }
 
 #[test]
@@ -563,7 +563,7 @@ fn removing_only_fullscreen_tile_updates_view_offset() {
     let mut layout = check_ops(ops);
 
     // View pos with gap.
-    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-132");
+    assert_snapshot!(layout.active_workspace().unwrap().scrolling().view_pos(), @"-16");
 
     let ops = [
         Op::FullscreenWindow(2),
