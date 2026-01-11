@@ -4302,6 +4302,27 @@ impl Niri {
             draw_opaque_regions(&mut elements, output_scale);
         }
 
+        // In case the optimized blur layer is dirty, re-render
+        // It only has the bottom and background layer shells drawn onto with blur applied.
+        //
+        // We must do it now before we actually render the previous render elements into the final
+        // composited blur buffer
+        let mut fx_buffers = EffectsFramebuffers::get(output);
+        let blur_config = self.config.borrow().layout.blur;
+
+        if blur_config.on && blur_config.passes > 0 {
+            let layer_map = layer_map_for_output(output);
+            if let Err(err) = fx_buffers.update_optimized_blur_buffer(
+                renderer.as_gles_renderer(),
+                layer_map,
+                output,
+                Scale::from(output.current_scale().fractional_scale()),
+                blur_config,
+            ) {
+                error!(?err, "Failed to update optimized blur buffer");
+            }
+        }
+
         elements
     }
 
@@ -4524,12 +4545,6 @@ impl Niri {
         push_popups_from_layer!(Layer::Background, true);
         push_normal_from_layer!(Layer::Background, true);
 
-        elements.push(backdrop);
-
-        if self.debug_draw_opaque_regions {
-            draw_opaque_regions(&mut elements, output_scale);
-        }
-
         // In case the optimized blur layer is dirty, re-render
         // It only has the bottom and background layer shells drawn onto with blur applied.
         //
@@ -4550,7 +4565,7 @@ impl Niri {
             }
         }
 
-        elements
+        push(backdrop);
     }
 
     fn layers_in_render_order<'a>(
